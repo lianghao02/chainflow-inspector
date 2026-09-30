@@ -506,4 +506,45 @@ class AnalysisTests(unittest.TestCase):
             # 應針對 4 軌核心儲備代幣分別呼叫
             self.assertEqual(mock_att.call_count, 4)
 
+    def test_zero_address_classified_as_mint_and_excluded_from_subpoena(self):
+        from chain_fund_tracer.analysis import ZERO_ADDRESS, classify_path_category, build_subpoena_candidates
+        from chain_fund_tracer.models import AnalysisResult, TraceStep
+
+        analyzer = Analyzer(FakeProvider())
+        cls_name, lbl, basis, conf = analyzer.classify(ZERO_ADDRESS)
+        self.assertEqual(cls_name, "代幣鑄造 (Mint)")
+        self.assertIn("零地址", lbl)
+
+        # 驗證路徑分類：零地址作為來源或目標時，一律歸類為內部平台回款／贖回（代幣鑄造）
+        step_mint = TraceStep(
+            direction="地址入金", hop=1, tx_hash="0x" + "1" * 64, timestamp="2026-01-01 00:00:00",
+            token="pUSD", amount="100", from_address=ZERO_ADDRESS, to_address="0x" + "a" * 40,
+            address="0x" + "a" * 40, classification="代幣鑄造 (Mint)", label="零地址（代幣鑄造發行）",
+            label_source="EVM 規範", confidence="已確認", relation="直接交易", notes="代幣鑄造",
+            path_role="內部", event_role="代幣鑄造",
+        )
+        self.assertEqual(classify_path_category(step_mint), "Polymarket 平台內部回款／贖回")
+
+        # 驗證調證清單：絕不可出現零地址
+        res = AnalysisResult(query="0x" + "a" * 40)
+        res.steps = [step_mint]
+        candidates = build_subpoena_candidates(res)
+        self.assertEqual(len(candidates), 0, "零地址絕不可被加入函調候選清單或上游追查名單")
+
+    def test_fetch_json_retries_on_transient_timeout(self):
+        from chain_fund_tracer.providers import fetch_json
+        import urllib.error
+
+        # 第一次模擬逾時，第二次成功
+        mock_response = unittest.mock.MagicMock()
+        mock_response.read.return_value = b'{"success": true}'
+        mock_response.__enter__.return_value = mock_response
+
+        with patch("chain_fund_tracer.providers.urlopen", side_effect=[urllib.error.URLError("The read operation timed out"), mock_response]) as mock_url:
+            with patch("time.sleep") as mock_sleep:
+                data = fetch_json("http://example.com/test", timeout=5, max_retries=1)
+                self.assertEqual(data, {"success": True})
+                self.assertEqual(mock_url.call_count, 2)
+                mock_sleep.assert_called_once()
+
 if __name__ == "__main__": unittest.main()

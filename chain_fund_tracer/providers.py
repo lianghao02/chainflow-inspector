@@ -1,9 +1,10 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 import json
+import time
 from typing import Any
 from urllib.parse import urlencode
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .config import Settings
 from .relay_evidence import select_request
@@ -74,24 +75,45 @@ TRONSCAN_API = "https://apilist.tronscanapi.com/api"
 def fetch_json(
     url: str,
     payload: dict[str, Any] | list[dict[str, Any]] | None = None,
-    timeout: int = 20,
+    timeout: int = 25,
     headers: dict[str, str] | None = None,
+    max_retries: int = 2,
 ) -> Any:
     request_headers = {"Content-Type": "application/json", "User-Agent": "ChainFundTracer/0.2"}
     request_headers.update(headers or {})
-    request = Request(url, data=json.dumps(payload).encode("utf-8") if payload else None, headers=request_headers)
-    try:
-        with urlopen(request, timeout=timeout) as response: return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
+    request_data = json.dumps(payload).encode("utf-8") if payload else None
+
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        request = Request(url, data=request_data, headers=request_headers)
         try:
-            detail = json.loads(exc.read().decode("utf-8")).get("message", "")
-        except Exception:
-            detail = ""
-        hint = f"；{detail}" if detail else ""
-        raise ProviderError(f"公開資料服務回應 HTTP {exc.code}{hint}") from exc
-    except Exception as exc:
-        hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
-        raise ProviderError(f"無法取得公開鏈上資料：{exc}{hint}") from exc
+            with urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if 400 <= exc.code < 500:
+                try:
+                    detail = json.loads(exc.read().decode("utf-8")).get("message", "")
+                except Exception:
+                    detail = ""
+                hint = f"；{detail}" if detail else ""
+                raise ProviderError(f"公開資料服務回應 HTTP {exc.code}{hint}") from exc
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep(1.0)
+                continue
+            raise ProviderError(f"公開資料服務伺服器錯誤 HTTP {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep(1.2)
+                continue
+            hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
+            raise ProviderError(f"無法取得公開鏈上資料：{exc}{hint}") from exc
+        except Exception as exc:
+            hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
+            raise ProviderError(f"無法取得公開鏈上資料：{exc}{hint}") from exc
+
+    raise ProviderError(f"公開鏈上資料請求逾時或連線失敗：{last_exc}")
 class PolygonProvider:
     def __init__(self, settings: Settings):
         self.settings, self._rpc_id = settings, 0

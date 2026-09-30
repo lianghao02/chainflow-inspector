@@ -312,7 +312,7 @@ function renderAllResults(data) {
   const kycCandidates = subpoenas.filter((c) => c.inquiry_value === '可函調 KYC');
   const upstreamCandidates = subpoenas.filter((c) => c.inquiry_value !== '可函調 KYC');
 
-  const bettingSteps = steps.filter((s) => s.path_category === 'Polymarket 平台內部回款／贖回' || s.event_role === '投注買賣');
+  const bettingSteps = steps.filter((s) => s.direction === 'Polymarket 投注' || s.event_role === '投注買賣');
   const inboundSteps = steps.filter((s) => s.path_role === '入金');
 
   // 3. 更新頁籤計數器徽章
@@ -702,7 +702,28 @@ function renderBettingTable(steps) {
     return;
   }
 
+  // 依 tx_hash 去重，優先保留解析出市場題目與選項的紀錄
+  const dedupedSteps = [];
+  const seenTx = new Map();
   steps.forEach((s) => {
+    const tx = (s.tx_hash || '').toLowerCase();
+    const info = s.trade_info || {};
+    const hasRichInfo = Boolean(info.market_title && info.market_title !== '市場題目待解析');
+    if (!seenTx.has(tx)) {
+      seenTx.set(tx, s);
+      dedupedSteps.push(s);
+    } else if (hasRichInfo) {
+      const prev = seenTx.get(tx);
+      const prevInfo = prev.trade_info || {};
+      if (!prevInfo.market_title || prevInfo.market_title === '市場題目待解析') {
+        seenTx.set(tx, s);
+        const idx = dedupedSteps.indexOf(prev);
+        if (idx !== -1) dedupedSteps[idx] = s;
+      }
+    }
+  });
+
+  dedupedSteps.forEach((s) => {
     const info = s.trade_info || {};
     const tr = document.createElement('tr');
 

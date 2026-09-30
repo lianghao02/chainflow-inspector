@@ -1,18 +1,45 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十二輪已完成 P0 發布前必修修復（requirements.txt 鎖定、app.py 明確啟動提示、HTML/JS 全面杜絕 XSS、金鑰脫敏與白名單 Explorer、EOA 遞迴嚴格幣別金額時間核對防誤認本金、歷史最早 POL Gas 排序）與 P1/P2 介面判讀優化（本案初步結論摘要橫幅、4 軌狀態徽章、流程圖文字防疊錯位、自動置中 fitToView、可函調服務商獨立頁籤、整合匯出選單）；全套 114 項測試 100% 通過。**
+> **第三十三輪已完成 4 大法證與視覺化重大修復：零地址徹底標定為代幣鑄造並自調證清單完全排除、平行邊依動態法向量曲率展開並加深色氣泡背景杜絕重疊、fetch_json 增加 25 秒超時與 2 次失敗重試抗防網路中斷、投注解碼排除內部回款步驟並依 Tx 去重；全套 116 項測試 100% 通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
-- **Baseline Commit SHA**：`a250b87`
-- **Software Version**：`v1.4.1`（P0 發布前安全加固、EOA 遞迴嚴格法證核對、歷史最早燃料排序、XSS 徹底免疫、PyWebView 現代化法證工作台、初步結論摘要橫幅、可函調服務商獨立頁籤、4 軌狀態徽章、視野自適應圖譜）
+- **Baseline Commit SHA**：`d70e61d`
+- **Software Version**：`v1.4.2`（零地址法證嚴格排除、平行邊彩虹曲率展開與氣泡卡片、API 超時重試防護、投注解碼精準去重、全套 116 項測試通過）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
 - **Task Type**：FIX / IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
+
+---
+
+## 第三十三輪完成工作：4 大法證與視覺化核心問題修復
+
+### 一、零地址（`0x0000...0000`）法證標定與完全排除（`analysis.py`）
+1. **分類標籤標定**：`classify()` 針對 `ZERO_ADDRESS` 回傳 `("代幣鑄造 (Mint)", "零地址（代幣鑄造發行）", "EVM 規範／代幣合約發行", "已確認")`。
+2. **路徑分類歸納**：`classify_path_category()` 判定來源或目的為零地址之 Transfer，固定歸類為 `Polymarket 平台內部回款／贖回`。
+3. **函調候選清單雙重排除**：`build_subpoena_candidates()` 明確過濾零地址，絕不將代幣鑄造視為非託管個人錢包或放入調證追蹤清單。
+4. **候選轉換精確標記**：`_analyze_polymarket_address()` 生成步驟時，若來源為零地址，設定 `path_role="內部"`, `event_role="代幣鑄造"`, `notes="零地址代幣鑄造（Minting），非外部錢包轉帳。"`。
+
+### 二、平行邊（Parallel Edges）動態法向量曲率展開與深色氣泡卡片（`graph.js`）
+1. **定向節點對分組**：繪製邊前依定向 `pairKey = from->to` 統計平行邊數量 `pairTotal` 與目前邊索引 `pairIndex`。
+2. **垂直法向量曲率偏移**：計算端點垂直法向量 `(nx, ny)`，偏移量 `pairOffset = (pairIndex - (pairTotal - 1) / 2) * 38px`，使多筆轉帳如彩虹般自然層次分開，徹底消除重合。
+3. **獨立深色氣泡背景**：標籤位置沿弧線中點定位，並在 SVG 中繪製 `<rect rx="4" fill="#0a0f1d">` 深色氣泡矩形，文字置中（`dominant-baseline="central"`），杜絕文字與背後線條黏連。
+
+### 三、API 超時防護與自動重試機制（`providers.py`）
+1. **超時放寬**：`fetch_json()` 超時由 20 秒調整至 25 秒。
+2. **自動失敗重試**：增加 `max_retries=2` 機制，針對 `The read operation timed out`、連線重置或 5xx 伺服器錯誤自動暫停 1.0～1.2 秒後重試，有效杜絕大地址查詢時核心儲備代幣定向軌道整軌報錯。
+
+### 四、投注解碼篩選修正與去重（`app.js`）
+1. **篩選範圍收斂**：移除將非投注的合約內部回款納入 `bettingSteps` 的錯誤條件，嚴格限定 `s.direction === 'Polymarket 投注' || s.event_role === '投注買賣'`。
+2. **Tx Hash 去重與資訊優先**：`renderBettingTable` 依 `tx_hash` 去重，同筆 Tx 優先保留解析出市場題目與選項的明細，杜絕顯示 20 筆重複待解析交易。
+
+### 五、單元測試驗證
+- 新增 `test_zero_address_classified_as_mint_and_excluded_from_subpoena` 與 `test_fetch_json_retries_on_transient_timeout`。
+- 全套 116 項單元測試 100% 通過（`Ran 116 tests in 74.326s, OK`）。
 
 ---
 

@@ -104,7 +104,12 @@ def classify_path_category(step: TraceStep) -> str:
     cls_name = step.classification or ""
 
     if (
-        step.path_role in ("內部", "平台內部")
+        from_addr == normalize(ZERO_ADDRESS)
+        or to_addr == normalize(ZERO_ADDRESS)
+        or "代幣鑄造" in lbl
+        or "mint" in lbl
+        or cls_name == "代幣鑄造 (Mint)"
+        or step.path_role in ("內部", "平台內部")
         or step.direction in ("Polymarket 投注", "Polymarket 結算")
         or from_addr in POLYMARKET_INTERNAL
         or to_addr in POLYMARKET_INTERNAL
@@ -148,13 +153,19 @@ def classify_path_category(step: TraceStep) -> str:
 def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]:
     """從分析步驟提煉法證「函調候選清單」，排除純平台撮合與無調證價值之資訊，
     並標註可函調 KYC、僅供上游追蹤與不可作 KYC 終點。
+    嚴格排除零地址（ERC-20 代幣鑄造／銷毀無私鑰，不可調證）。
     """
     candidates: list[SubpoenaCandidate] = []
     seen_keys: set[tuple[str, str, str]] = set()
 
     for step in result.steps:
-        # 跳過平台內部回款與純下注合約
-        if step.path_category == "Polymarket 平台內部回款／贖回":
+        # 跳過平台內部回款、純下注合約與零地址（代幣鑄造／銷毀無私鑰，不可調證）
+        if (
+            step.path_category == "Polymarket 平台內部回款／贖回"
+            or normalize(step.from_address) == normalize(ZERO_ADDRESS)
+            or normalize(step.to_address) == normalize(ZERO_ADDRESS)
+            or "0x0000000000000000000000000000000000000000" in (normalize(step.from_address), normalize(step.to_address))
+        ):
             continue
 
         key = (step.tx_hash.lower(), step.from_address.lower(), step.to_address.lower())
@@ -306,6 +317,7 @@ class Analyzer:
         if public_label and any(word in label_lower for word in ("relay", "bridge", "solver")):
             return ("Bridge", public_label, "Explorer 公開標籤", "高度可能")
         if value == POLYMARKET_CONDITIONAL_TOKENS: return ("Polymarket", "Polymarket Conditional Tokens", "內建公開合約清冊", "已確認")
+        if value == normalize(ZERO_ADDRESS): return ("代幣鑄造 (Mint)", "零地址（代幣鑄造發行）", "EVM 規範／代幣合約發行", "已確認")
         if value == PUSD: return ("Polymarket", "Polymarket pUSD", "內建公開合約清冊", "已確認")
         if value in (CTF_EXCHANGE, NEG_RISK_EXCHANGE): return ("Polymarket", "Polymarket Exchange", "內建公開合約清冊", "已確認")
         if value == COLLATERAL_ONRAMP: return ("Polymarket", "Polymarket Collateral Onramp", "內建公開合約清冊", "已確認")
@@ -672,14 +684,18 @@ class Analyzer:
         if redemption_hashes:
             result.summary.append(f"另辨識 {len(redemption_hashes)} 筆 pUSD 贖回／出金交易，已與入金候選分開。")
         for candidate in candidates:
+            is_zero_from = normalize(candidate["from"]) == normalize(ZERO_ADDRESS)
             kind, label, source, confidence = self.classify(candidate["from"], candidate.get("label", ""))
             ev_source = "使用者提供之 CSV 歷史索引（待鏈上核實）" if csv_path else "Explorer Token Transfers 索引"
+            p_role = "內部" if is_zero_from else "入金"
+            e_role = "代幣鑄造" if is_zero_from else "補款"
+            note = "零地址代幣鑄造（Minting），非外部錢包轉帳。" if is_zero_from else candidate["note"]
             result.steps.append(TraceStep(
                 "地址入金", 1, candidate["hash"], timestamp_to_text(candidate["time"]),
                 candidate["token"], candidate["amount"], candidate["from"], address,
-                candidate["from"], kind, label, source, confidence, "僅資金關聯", candidate["note"],
+                candidate["from"], kind, label, source, confidence, "僅資金關聯", note,
                 chain="Polygon", block_number=candidate.get("block_number", ""), log_index=candidate.get("log_index", ""),
-                path_role="入金", event_role="補款", explorer_url=f"https://polygonscan.com/tx/{candidate['hash']}",
+                path_role=p_role, event_role=e_role, explorer_url=f"https://polygonscan.com/tx/{candidate['hash']}",
                 chain_id=137, evidence_source=ev_source,
             ))
         self.progress("正在解析 pUSD 鑄造交易中的底層 USDC…")

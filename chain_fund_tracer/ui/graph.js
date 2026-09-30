@@ -437,10 +437,20 @@ class FlowGraph {
     });
 
     // =========================================================================
-    // 繪製連線（Edges）
+    // 繪製連線（Edges）：平行邊曲率展開與深色氣泡卡片
     // =========================================================================
 
-    edges.forEach((edge, idx) => {
+    // 預先統計每對節點之間的所有邊，以動態分離平行邊（Parallel Edges）
+    const pairGroups = new Map();
+    edges.forEach((edge) => {
+      const pairKey = `${edge.from}->${edge.to}`;
+      if (!pairGroups.has(pairKey)) {
+        pairGroups.set(pairKey, []);
+      }
+      pairGroups.get(pairKey).push(edge);
+    });
+
+    edges.forEach((edge) => {
       const u = nodes.get(edge.from);
       const v = nodes.get(edge.to);
       if (!u || !v) return;
@@ -448,13 +458,33 @@ class FlowGraph {
       const edgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       edgeG.style.cursor = 'pointer';
 
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      // 平行邊曲率展開計算
+      const pairKey = `${edge.from}->${edge.to}`;
+      const pairList = pairGroups.get(pairKey) || [edge];
+      const pairIndex = pairList.indexOf(edge);
+      const pairTotal = pairList.length;
+
       const dx = v.x - u.x;
       const dy = v.y - u.y;
-      const cx1 = u.x + dx * 0.5;
-      const cy1 = u.y;
-      const cx2 = u.x + dx * 0.5;
-      const cy2 = v.y;
+      const dist = Math.hypot(dx, dy) || 1;
+
+      // 垂直單位法向量 (nx, ny)
+      const nx = -dy / dist;
+      const ny = dx / dist;
+
+      // 若同方向只有 1 條邊，偏移量為 0；若有多條，依序展開
+      const spreadStep = 38;
+      const pairOffset = pairTotal > 1 ? (pairIndex - (pairTotal - 1) / 2) * spreadStep : 0;
+
+      // 控制點與中點
+      const cx1 = u.x + dx * 0.35 + nx * pairOffset;
+      const cy1 = u.y + dy * 0.35 + ny * pairOffset;
+      const cx2 = u.x + dx * 0.65 + nx * pairOffset;
+      const cy2 = u.y + dy * 0.65 + ny * pairOffset;
+      const midX = (u.x + v.x) / 2 + nx * (pairOffset * 0.85);
+      const midY = (u.y + v.y) / 2 + ny * (pairOffset * 0.85);
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       const d = `M ${u.x} ${u.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${v.x} ${v.y}`;
       path.setAttribute('d', d);
       path.setAttribute('fill', 'none');
@@ -486,23 +516,42 @@ class FlowGraph {
 
       path.setAttribute('marker-end', `url(#${marker})`);
 
-      // 箭頭文字卡片（上下錯位防重疊）
-      const midX = (u.x + v.x) / 2;
-      const staggerOffset = ((idx % 3) - 1) * 16;
-      const midY = (u.y + v.y) / 2 - 10 + staggerOffset;
+      // 箭頭文字氣泡卡片（含獨立深色背景氣泡，杜絕與背後線條黏連重疊）
+      const labelText = edge.isBridgeLeg ? '🌉 已唯一配對（跨鏈）' : `${edge.amount} ${edge.token}`;
+      const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      badgeG.setAttribute('transform', `translate(${midX}, ${midY})`);
+
+      // 估算文字寬度以繪製氣泡圓角矩形
+      const textLen = labelText.length;
+      const boxW = Math.max(textLen * 7.5 + 16, 70);
+      const boxH = 22;
+
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', -boxW / 2);
+      rect.setAttribute('y', -boxH / 2);
+      rect.setAttribute('width', boxW);
+      rect.setAttribute('height', boxH);
+      rect.setAttribute('rx', '4');
+      rect.setAttribute('fill', isSelected ? '#1e293b' : '#0a0f1d');
+      rect.setAttribute('stroke', isSelected ? '#ffffff' : strokeColor);
+      rect.setAttribute('stroke-width', isSelected ? '1.5' : '1');
+      rect.setAttribute('opacity', '0.94');
 
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', midX);
-      text.setAttribute('y', midY);
+      text.setAttribute('x', '0');
+      text.setAttribute('y', '0');
       text.setAttribute('fill', isSelected ? '#ffffff' : strokeColor);
       text.setAttribute('font-size', '11');
       text.setAttribute('font-weight', '700');
       text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('style', 'paint-order: stroke; stroke: #0a0e14; stroke-width: 3.5px; stroke-linejoin: round;');
-      text.textContent = edge.isBridgeLeg ? '🌉 已唯一配對（跨鏈）' : `${edge.amount} ${edge.token}`;
+      text.setAttribute('dominant-baseline', 'central');
+      text.textContent = labelText;
+
+      badgeG.appendChild(rect);
+      badgeG.appendChild(text);
 
       edgeG.appendChild(path);
-      edgeG.appendChild(text);
+      edgeG.appendChild(badgeG);
 
       edgeG.addEventListener('click', (e) => {
         e.stopPropagation();
