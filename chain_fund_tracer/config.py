@@ -5,6 +5,7 @@ from pathlib import Path
 
 @dataclass
 class Settings:
+    _serializable = False
     rpc_url: str = "https://polygon.drpc.org"
     blockscout_url: str = "https://polygon.blockscout.com/api/v2"
     etherscan_api_key: str = ""

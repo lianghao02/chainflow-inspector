@@ -1,14 +1,14 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十三輪已完成 4 大法證與視覺化重大修復：零地址徹底標定為代幣鑄造並自調證清單完全排除、平行邊依動態法向量曲率展開並加深色氣泡背景杜絕重疊、fetch_json 增加 25 秒超時與 2 次失敗重試抗防網路中斷、投注解碼排除內部回款步驟並依 Tx 去重；全套 116 項測試 100% 通過。**
+> **第三十三輪已完成 4 大法證與視覺化重大修復＋PyWebView js_api 私有屬性加固（排除 window/settings/provider 避免 pywebview 遞迴掃描 DOM 拋錯導致 API 初始化失敗，徹底解決 `run_analysis is not a function`）；全套 116 項測試 100% 通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
-- **Baseline Commit SHA**：`d70e61d`
-- **Software Version**：`v1.4.2`（零地址法證嚴格排除、平行邊彩虹曲率展開與氣泡卡片、API 超時重試防護、投注解碼精準去重、全套 116 項測試通過）
+- **Baseline Commit SHA**：`745c053`
+- **Software Version**：`v1.4.3`（零地址法證嚴格排除、平行邊彩虹曲率展開、API 超時重試防護、投注解碼精準去重、PyWebView js_api 私有化加固徹底修復 run_analysis is not a function）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
 - **Task Type**：FIX / IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
@@ -16,7 +16,7 @@
 
 ---
 
-## 第三十三輪完成工作：4 大法證與視覺化核心問題修復
+## 第三十三輪完成工作：4 大法證與視覺化核心問題修復 ＋ PyWebView js_api 私有化加固
 
 ### 一、零地址（`0x0000...0000`）法證標定與完全排除（`analysis.py`）
 1. **分類標籤標定**：`classify()` 針對 `ZERO_ADDRESS` 回傳 `("代幣鑄造 (Mint)", "零地址（代幣鑄造發行）", "EVM 規範／代幣合約發行", "已確認")`。
@@ -37,9 +37,15 @@
 1. **篩選範圍收斂**：移除將非投注的合約內部回款納入 `bettingSteps` 的錯誤條件，嚴格限定 `s.direction === 'Polymarket 投注' || s.event_role === '投注買賣'`。
 2. **Tx Hash 去重與資訊優先**：`renderBettingTable` 依 `tx_hash` 去重，同筆 Tx 優先保留解析出市場題目與選項的明細，杜絕顯示 20 筆重複待解析交易。
 
-### 五、單元測試驗證
+### 五、PyWebView js_api 內部屬性私有化加固（徹底修復 `run_analysis is not a function`）
+1. **根本原因鎖定**：`Controller` 原有公開屬性 `self.window`（`webview.Window` 物件）在 PyWebView 的 `get_functions` 內部被當成巢狀物件遞迴掃描，觸發 `window.dom.body` 的 `evaluate_js` 失敗拋出 `WebViewException: Main window failed to start`，導致 pywebview 的 `_createApi` 腳本完全未注入，前端 `window.pywebview.api` 成為空物件。
+2. **內部屬性底線化**：`self._window`, `self._settings`, `self._provider`, `self._current_result`, `self._is_running`, `self._cancel_requested` 全面私有化，pywebview 只暴露真正之 13 個 API 方法。
+3. **類別宣告 `_serializable = False`**：在 `Settings` 與 `PolygonProvider` 上宣告 `_serializable = False`，雙重封鎖非 API 物件之遞迴掃描。
+4. **前端 API 就緒監聽與防呆升級**：`app.js` 在 `DOMContentLoaded` 中嚴格驗證 `typeof window.pywebview.api.get_init_data === 'function'` 才直接初始化，否則監聽 `pywebviewready` 事件；點擊「開始法證追查」前增加 API 狀態檢查。
+
+### 六、單元測試驗證
 - 新增 `test_zero_address_classified_as_mint_and_excluded_from_subpoena` 與 `test_fetch_json_retries_on_transient_timeout`。
-- 全套 116 項單元測試 100% 通過（`Ran 116 tests in 74.326s, OK`）。
+- 全套 116 項單元測試 100% 通過（`Ran 116 tests in 84.714s, OK`）。
 
 ---
 

@@ -27,16 +27,24 @@ class Controller:
     """
 
     def __init__(self, window: webview.Window | None = None):
-        self.window = window
-        self.settings = Settings.load()
-        self.provider = PolygonProvider(self.settings)
-        self.current_result: AnalysisResult | None = None
-        self.is_running = False
-        self.cancel_requested = False
+        self._window = window
+        self._settings = Settings.load()
+        self._provider = PolygonProvider(self._settings)
+        self._current_result: AnalysisResult | None = None
+        self._is_running = False
+        self._cancel_requested = False
         self._analysis_thread: threading.Thread | None = None
 
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
+    @property
+    def current_result(self) -> AnalysisResult | None:
+        return self._current_result
+
     def set_window(self, window: webview.Window) -> None:
-        self.window = window
+        self._window = window
 
     # ==========================
     # 初始資料與設定
@@ -45,7 +53,7 @@ class Controller:
     def get_init_data(self) -> dict[str, Any]:
         """提供前端初始化所需之設定與歷史記錄。"""
         history_list = [entry.to_dict() for entry in list_history_entries()]
-        core_tokens = getattr(self.settings, "core_inbound_tokens", [
+        core_tokens = getattr(self._settings, "core_inbound_tokens", [
             "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",  # Native USDC
             "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",  # USDC.e
             "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb",  # pUSD
@@ -54,13 +62,13 @@ class Controller:
         return {
             "product_name": PRODUCT_NAME,
             "settings": {
-                "rpc_url": self.settings.rpc_url,
-                "blockscout_url": self.settings.blockscout_url,
-                "has_etherscan_api_key": bool(self.settings.etherscan_api_key.strip()),
-                "orbscan_api_url": getattr(self.settings, "orbscan_api_url", ""),
-                "max_hops": self.settings.max_hops,
-                "page_size": self.settings.page_size,
-                "max_history_pages": getattr(self.settings, "max_history_pages", 15),
+                "rpc_url": self._settings.rpc_url,
+                "blockscout_url": self._settings.blockscout_url,
+                "has_etherscan_api_key": bool(self._settings.etherscan_api_key.strip()),
+                "orbscan_api_url": getattr(self._settings, "orbscan_api_url", ""),
+                "max_hops": self._settings.max_hops,
+                "page_size": self._settings.page_size,
+                "max_history_pages": getattr(self._settings, "max_history_pages", 15),
                 "core_inbound_tokens": core_tokens,
             },
             "history": history_list,
@@ -73,16 +81,16 @@ class Controller:
                 if key == "etherscan_api_key":
                     val_str = str(val).strip()
                     if val_str:  # 僅在明確提供新金鑰時才覆寫
-                        self.settings.etherscan_api_key = val_str
-                elif hasattr(self.settings, key):
+                        self._settings.etherscan_api_key = val_str
+                elif hasattr(self._settings, key):
                     if key in ("max_hops", "page_size", "max_history_pages"):
-                        setattr(self.settings, key, int(val))
+                        setattr(self._settings, key, int(val))
                     elif key == "core_inbound_tokens" and isinstance(val, list):
-                        setattr(self.settings, key, [str(t).strip().lower() for t in val if str(t).strip()])
+                        setattr(self._settings, key, [str(t).strip().lower() for t in val if str(t).strip()])
                     else:
-                        setattr(self.settings, key, str(val).strip())
-            self.settings.save()
-            self.provider = PolygonProvider(self.settings)
+                        setattr(self._settings, key, str(val).strip())
+            self._settings.save()
+            self._provider = PolygonProvider(self._settings)
             return {"success": True, "message": "設定已更新"}
         except Exception as exc:
             return {"success": False, "message": f"設定儲存失敗：{exc}"}
@@ -93,10 +101,10 @@ class Controller:
 
     def select_csv_file(self) -> str:
         """開啟系統原生檔案選擇對話框，選擇 PolygonScan CSV 檔案。"""
-        if not self.window:
+        if not self._window:
             return ""
         file_types = ("CSV 試算表檔案 (*.csv)", "所有檔案 (*.*)")
-        result = self.window.create_file_dialog(
+        result = self._window.create_file_dialog(
             webview.OPEN_DIALOG,
             allow_multiple=False,
             file_types=file_types,
@@ -121,15 +129,15 @@ class Controller:
 
     def run_analysis(self, params: dict[str, Any]) -> dict[str, Any]:
         """執行資金追蹤分析（同步或從前端非同步呼叫）。"""
-        if self.is_running:
+        if self._is_running:
             return {"success": False, "error": "已有分析任務正在執行中"}
 
-        self.is_running = True
-        self.cancel_requested = False
+        self._is_running = True
+        self._cancel_requested = False
 
         query = str(params.get("query", "")).strip()
         mode = str(params.get("mode", "polymarket")).strip()
-        hops = int(params.get("hops", self.settings.max_hops or 2))
+        hops = int(params.get("hops", self._settings.max_hops or 2))
         time_filter_raw = str(params.get("time_filter_raw", "")).strip()
         csv_path = str(params.get("csv_path", "")).strip()
 
@@ -148,17 +156,17 @@ class Controller:
                 else:
                     as_of_time = parse_user_datetime_input(time_filter_raw, True)
             except Exception as exc:
-                self.is_running = False
+                self._is_running = False
                 return {"success": False, "error": f"時間篩選格式錯誤：{exc}"}
 
         def on_progress(msg: str) -> None:
-            if self.cancel_requested:
+            if self._cancel_requested:
                 raise InterruptedError("使用者已手動停止查詢")
-            if self.window:
+            if self._window:
                 safe_msg = json.dumps(msg, ensure_ascii=False)
-                self.window.evaluate_js(f"window.__onProgress && window.__onProgress({safe_msg})")
+                self._window.evaluate_js(f"window.__onProgress && window.__onProgress({safe_msg})")
 
-        analyzer = Analyzer(self.provider, progress=on_progress)
+        analyzer = Analyzer(self._provider, progress=on_progress)
 
         try:
             on_progress("正在驗證輸入地址／交易雜湊…")
@@ -182,7 +190,7 @@ class Controller:
                     time_filter_raw=time_filter_raw,
                 )
 
-            self.current_result = result
+            self._current_result = result
             # 儲存至本機歷史記錄
             save_history_entry(result, mode=mode)
 
@@ -200,12 +208,12 @@ class Controller:
             tb = traceback.format_exc()
             return {"success": False, "error": f"系統發生未預期錯誤：{exc}", "traceback": tb}
         finally:
-            self.is_running = False
+            self._is_running = False
 
     def cancel_analysis(self) -> dict[str, Any]:
         """發出停止信號。"""
-        if self.is_running:
-            self.cancel_requested = True
+        if self._is_running:
+            self._cancel_requested = True
             return {"success": True, "message": "正在停止查詢…"}
         return {"success": False, "message": "目前無執行中任務"}
 
@@ -221,7 +229,7 @@ class Controller:
         """載入指定的歷史快照。"""
         result = load_history_entry(entry_id)
         if result:
-            self.current_result = result
+            self._current_result = result
             return {"success": True, "data": result.to_dict()}
         return {"success": False, "error": "找不到此歷史快照"}
 
@@ -236,12 +244,12 @@ class Controller:
 
     def export_report(self, export_type: str) -> dict[str, Any]:
         """開啟系統原生存檔對話框並匯出報告。"""
-        if not self.current_result:
+        if not self._current_result:
             return {"success": False, "error": "目前無可匯出的分析結果"}
-        if not self.window:
+        if not self._window:
             return {"success": False, "error": "無有效視窗環境"}
 
-        query_slug = self.current_result.query.replace("0x", "")[:12]
+        query_slug = self._current_result.query.replace("0x", "")[:12]
         date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         configs = {
@@ -256,7 +264,7 @@ class Controller:
             return {"success": False, "error": f"不支援的匯出格式：{export_type}"}
 
         default_filename, file_types = configs[export_type]
-        save_path = self.window.create_file_dialog(
+        save_path = self._window.create_file_dialog(
             webview.SAVE_DIALOG,
             save_filename=default_filename,
             file_types=file_types,
@@ -268,15 +276,15 @@ class Controller:
         dest = str(save_path)
         try:
             if export_type == "csv":
-                export_csv(self.current_result, dest)
+                export_csv(self._current_result, dest)
             elif export_type == "txt":
-                export_text(self.current_result, dest)
+                export_text(self._current_result, dest)
             elif export_type == "svg":
-                export_svg(self.current_result, dest)
+                export_svg(self._current_result, dest)
             elif export_type == "subpoena_csv":
-                export_subpoena_csv(self.current_result, dest)
+                export_subpoena_csv(self._current_result, dest)
             elif export_type == "zip":
-                export_evidence_package(self.current_result, dest)
+                export_evidence_package(self._current_result, dest)
             return {"success": True, "file_path": dest}
         except Exception as exc:
             return {"success": False, "error": f"匯出失敗：{exc}"}
@@ -285,7 +293,7 @@ class Controller:
     # 外部工具輔助（嚴格白名單防護）
     # ==========================
 
-    ALLOWED_HOSTS = {
+    _ALLOWED_HOSTS = {
         "polygonscan.com",
         "etherscan.io",
         "bscscan.com",
@@ -309,7 +317,7 @@ class Controller:
             # 檢查 hostname 是否屬於白名單網域或其子網域
             is_allowed = any(
                 hostname == allowed or hostname.endswith("." + allowed)
-                for allowed in self.ALLOWED_HOSTS
+                for allowed in self._ALLOWED_HOSTS
             )
             if is_allowed:
                 webbrowser.open(url)

@@ -115,6 +115,7 @@ def fetch_json(
 
     raise ProviderError(f"公開鏈上資料請求逾時或連線失敗：{last_exc}")
 class PolygonProvider:
+    _serializable = False
     def __init__(self, settings: Settings):
         self.settings, self._rpc_id = settings, 0
         self.token_history_truncated = False

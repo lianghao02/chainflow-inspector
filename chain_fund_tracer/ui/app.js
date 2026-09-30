@@ -13,8 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initEventListeners();
 
-  // 若在 pywebview 環境中，等待 API 準備完畢
-  if (window.pywebview) {
+  // 等待 pywebview API 準備完畢
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_init_data === 'function') {
     onPyWebViewReady();
   } else {
     window.addEventListener('pywebviewready', onPyWebViewReady);
@@ -256,6 +256,11 @@ async function handleStartTrace() {
   const hops = parseInt(document.getElementById('hopsSelect').value, 10) || 2;
   const timeFilter = document.getElementById('timeInput').value.trim();
   const csvPath = document.getElementById('csvInput').value.trim();
+
+  if (!window.pywebview || !window.pywebview.api || typeof window.pywebview.api.run_analysis !== 'function') {
+    alert('系統後端 API 尚未就緒，請稍候再試。若持續發生，請確認背景啟動是否正常。');
+    return;
+  }
 
   document.getElementById('startBtn').style.display = 'none';
   document.getElementById('stopBtn').style.display = 'inline-flex';
