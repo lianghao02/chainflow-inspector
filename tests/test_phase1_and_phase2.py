@@ -238,6 +238,85 @@ class TestPhase1AndPhase2(unittest.TestCase):
         self.assertEqual(binance_cand.inquiry_value, "可函調 KYC")
         self.assertEqual(binance_cand.association_level, "逐筆本金")
 
+    def test_inspect_initial_gas_funder_earliest_block_sort(self):
+        """驗證初始 POL 手續費來源必定按區塊高度升序取歷史最早一筆，而非無序或最新一筆。"""
+        provider = MagicMock()
+        provider.settings = Settings()
+        # 回傳兩筆：第 1 筆區塊較大 (最新，個人轉入)，第 2 筆區塊較小 (最早，OKX 交易所提幣開戶)
+        provider.address_native_transfers_before.return_value = [
+            {
+                "hash": "0xlate_tx",
+                "from": {"hash": "0xrandom_friend"},
+                "to": {"hash": "0xeoa_target"},
+                "value": "2.0",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "block_number": 55000000,
+            },
+            {
+                "hash": "0xearliest_tx",
+                "from": {"hash": "0xokx_hot", "name": "OKX: Hot Wallet"},
+                "to": {"hash": "0xeoa_target"},
+                "value": "10.0",
+                "timestamp": "2024-01-01T10:00:00Z",
+                "block_number": 50000000,
+            },
+        ]
+        provider.transaction_details.return_value = None
+        analyzer = Analyzer(provider)
+        res = AnalysisResult(query="0xeoa_target")
+
+        hit = analyzer._inspect_initial_gas_funder(res, "0xeoa_target", cutoff=1800000000, hop=2)
+        self.assertTrue(hit)
+        self.assertEqual(len(res.steps), 1)
+        step = res.steps[0]
+        # 必須命中 block 50000000 的最早一筆 0xearliest_tx
+        self.assertEqual(step.tx_hash, "0xearliest_tx")
+        self.assertEqual(step.direction, "手續費供資")
+        self.assertEqual(step.line_style, "dotted")
+        self.assertIn("OKX", step.label)
+
+    def test_append_eoa_recursive_upstream_amount_mismatch_downgrades(self):
+        """驗證當金額不符時，EOA 向上遞迴不會誤標為逐筆本金，而是降級為較早資金關聯 (dashed) 且僅供上游追蹤。"""
+        provider = MagicMock()
+        provider.settings = Settings()
+        provider.address_native_transfers_before.return_value = []
+
+        # 預期轉出 5000 USDC，但上游交易所轉入只有 10 USDC（金額差距過大，明顯非本案本金）
+        provider.address_token_transfers.return_value = [{
+            "transaction_hash": "0xmismatch_tx",
+            "from": {"hash": "0xbinance_hot", "name": "Binance: Hot Wallet"},
+            "to": {"hash": "0xeoa_target"},
+            "timestamp": "2024-05-11T10:00:00Z",
+            "token": {"symbol": "USDC", "decimals": 6},
+            "total": {"value": "10000000"},  # 10 USDC
+        }]
+        analyzer = Analyzer(provider)
+        res = AnalysisResult(query="0xpoly_target")
+
+        analyzer._append_eoa_recursive_upstream(
+            res,
+            eoa_address="0xeoa_target",
+            cutoff=1800000000,
+            current_hop=2,
+            max_hops=3,
+            expected_token="USDC",
+            expected_amount="5000.0",  # 預期 5000
+        )
+
+        self.assertEqual(len(res.steps), 1)
+        step = res.steps[0]
+        # 由於金額嚴重不符，必須為 dashed 虛線，且 pair_verified 為 False
+        self.assertEqual(step.line_style, "dashed")
+        self.assertFalse(step.pair_verified)
+        self.assertIn("非逐筆本金", step.notes)
+
+        # 檢驗函調清單：不可標為 [可函調 KYC]，應降級為 [僅供上游追蹤]
+        cands = build_subpoena_candidates(res)
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0].inquiry_value, "僅供上游追蹤")
+        self.assertEqual(cands[0].association_level, "輔助線索")
+
 
 if __name__ == "__main__":
     unittest.main()
+

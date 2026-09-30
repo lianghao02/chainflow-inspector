@@ -21,16 +21,48 @@
         <option value="">-- 載入歷史紀錄快照 --</option>
       </select>
 
-      <!-- 匯出按鈕組 -->
-      <div style="display: flex; gap: 4px;">
-        <button class="primary" data-export="zip" title="匯出完整法證證據包（包含 SHA-256 清冊、原始快照與報告）">📦 證據包 ZIP</button>
-        <button data-export="subpoena_csv" title="匯出函調候選清單 CSV（提供司法警察函調 KYC 用）">⚖️ 函調 CSV</button>
-        <button data-export="csv" title="匯出所有資金追蹤步驟 CSV">📊 步驟 CSV</button>
-        <button data-export="txt" title="匯出完整法證查核文字記錄">📄 文字報告</button>
-        <button data-export="svg" title="匯出向量圖形 SVG">🖼️ 流程圖</button>
+      <!-- 整合匯出下拉選單 -->
+      <div class="dropdown">
+        <button type="button" class="primary" id="exportDropdownBtn">📥 匯出法證文件 ▾</button>
+        <div class="dropdown-menu" id="exportDropdownMenu">
+          <button type="button" class="dropdown-item" data-export="zip">📦 完整證據包 ZIP (含 SHA-256)</button>
+          <button type="button" class="dropdown-item" data-export="subpoena_csv">⚖️ 函調候選清單 CSV</button>
+          <button type="button" class="dropdown-item" data-export="csv">📊 追蹤步驟清冊 CSV</button>
+          <button type="button" class="dropdown-item" data-export="txt">📄 查核文字報告 TXT</button>
+          <button type="button" class="dropdown-item" data-export="svg">🖼️ 資金路徑向量圖 SVG</button>
+        </div>
       </div>
     </div>
   </header>
+
+  <!-- 本案初步結論摘要橫幅 -->
+  <div class="summary-banner" id="summaryBanner">
+    <div class="summary-title">
+      <span>🛡️ 本案初步結論</span>
+    </div>
+    <div class="summary-metrics">
+      <div class="summary-pill">
+        <span class="summary-pill-label">🏛️ 可函調 KYC 服務商：</span>
+        <span class="summary-pill-value highlight" id="sumKycCount">尚未查詢</span>
+      </div>
+      <div class="summary-pill">
+        <span class="summary-pill-label">⚡ 逐筆本金主線：</span>
+        <span class="summary-pill-value" id="sumPrincipalCount">—</span>
+      </div>
+      <div class="summary-pill">
+        <span class="summary-pill-label">🌉 跨鏈／Relay 路徑：</span>
+        <span class="summary-pill-value" id="sumRelayCount">—</span>
+      </div>
+      <div class="summary-pill">
+        <span class="summary-pill-label">🔍 僅供上游追查節點：</span>
+        <span class="summary-pill-value" id="sumUpstreamCount">—</span>
+      </div>
+      <div class="summary-pill">
+        <span class="summary-pill-label">📜 資料完整性：</span>
+        <span class="summary-pill-value" id="sumTrackStatus">—</span>
+      </div>
+    </div>
+  </div>
 
   <!-- 主三欄工作台 -->
   <div class="main-container">
@@ -88,16 +120,24 @@
       </div>
 
       <div class="pane-section" style="flex: 1; overflow-y: auto;">
-        <div class="pane-section-title">核心資產定向檢索說明</div>
-        <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.6;">
-          本系統採用「核心儲備代幣定向打撈」機制，主動鎖定：
-          <ul style="margin-left: 16px; margin-top: 4px; color: var(--text-muted);">
-            <li>Native USDC (<span style="font-family: var(--font-mono);">0x3c49...</span>)</li>
-            <li>USDC.e (<span style="font-family: var(--font-mono);">0x2791...</span>)</li>
-            <li>pUSD (<span style="font-family: var(--font-mono);">0xc011...</span>)</li>
-            <li>USDT (<span style="font-family: var(--font-mono);">0xc213...</span>)</li>
-          </ul>
-          有效避開平台內部高頻撮合與空氣幣空投雜訊，精準提煉可函調之交易所出金來源。
+        <div class="pane-section-title">4 軌核心資產檢索狀態</div>
+        <div id="trackBadgesGrid" class="track-badges-grid">
+          <div class="track-badge-card" id="badge-usdc">
+            <div class="track-badge-header"><span>USDC</span><span class="track-badge-status ok" id="status-usdc">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdc">Native USDC</div>
+          </div>
+          <div class="track-badge-card" id="badge-usdce">
+            <div class="track-badge-header"><span>USDC.e</span><span class="track-badge-status ok" id="status-usdce">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdce">Bridged USDC</div>
+          </div>
+          <div class="track-badge-card" id="badge-pusd">
+            <div class="track-badge-header"><span>pUSD</span><span class="track-badge-status ok" id="status-pusd">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-pusd">Polymarket USD</div>
+          </div>
+          <div class="track-badge-card" id="badge-usdt">
+            <div class="track-badge-header"><span>USDT</span><span class="track-badge-status ok" id="status-usdt">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdt">Tether USD</div>
+          </div>
         </div>
       </div>
     </div>
@@ -118,6 +158,16 @@
         </div>
       </div>
 
+      <!-- 圖例列 -->
+      <div class="legend-bar">
+        <span style="font-weight:600; color:var(--text-primary); margin-right:4px;">圖例：</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#fbbf24;"></span> 🏛️ 交易所</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#c084fc;"></span> 🌉 跨鏈／Bridge</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#38bdf8;"></span> 🎯 Polymarket</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#64748b;"></span> 👛 外部個人錢包</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#34d399;"></span> ⭐ 目標錢包</span>
+      </div>
+
       <div class="graph-viewport">
         <svg id="flowSvg"></svg>
       </div>
@@ -135,17 +185,20 @@
 
   </div>
 
-  <!-- 底欄：5 大資料頁籤抽屜 -->
+  <!-- 底欄：6 大資料頁籤抽屜 -->
   <div class="drawer-container" id="bottomDrawer">
     <div class="drawer-tabs">
       <div class="drawer-tab active" data-tab="subpoena">
-        ⚖️ 函調候選清單 <span class="drawer-tab-count" id="countSubpoena">0</span>
+        🏛️ 可函調服務商 <span class="drawer-tab-count" id="countSubpoena">0</span>
+      </div>
+      <div class="drawer-tab" data-tab="upstream">
+        🔍 上游追查節點 <span class="drawer-tab-count" id="countUpstream">0</span>
+      </div>
+      <div class="drawer-tab" data-tab="inbound">
+        🛣️ 入金路徑 <span class="drawer-tab-count" id="countInbound">0</span>
       </div>
       <div class="drawer-tab" data-tab="betting">
         🎯 投注解碼 <span class="drawer-tab-count" id="countBetting">0</span>
-      </div>
-      <div class="drawer-tab" data-tab="inbound">
-        💰 入金路徑 <span class="drawer-tab-count" id="countInbound">0</span>
       </div>
       <div class="drawer-tab" data-tab="audit">
         📜 查詢狀態與稽核軌道 <span class="drawer-tab-count" id="countAudit">0</span>
@@ -158,43 +211,44 @@
       </div>
     </div>
 
-    <!-- Tab 1: 函調候選清單 (預設高優先展示) -->
+    <!-- Tab 1: 可函調服務商 (高優先展示真實 CEX/法幣等 KYC 終點) -->
     <div class="drawer-content active" id="tab-subpoena">
       <table class="data-table" id="subpoenaTable">
         <thead>
           <tr>
-            <th>候選服務商</th>
-            <th>服務類型</th>
+            <th>可函調服務商</th>
+            <th>實體類型</th>
             <th>函調價值</th>
-            <th>金額與資產</th>
+            <th>涉案資產金額</th>
             <th>時間 (UTC+8)</th>
-            <th>來源地址 (From)</th>
+            <th>涉案提幣地址</th>
             <th>交易雜湊 (Tx)</th>
-            <th>法證限制與函調建議</th>
+            <th>法定函調建議與限制</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="8" style="text-align:center; color:#64748b;">尚未執行查詢或無候選紀錄。</td></tr>
+          <tr><td colspan="8" style="text-align:center; color:#64748b;">尚未執行查詢或無可調證之服務商。</td></tr>
         </tbody>
       </table>
     </div>
 
-    <!-- Tab 2: 投注解碼 -->
-    <div class="drawer-content" id="tab-betting">
-      <table class="data-table" id="bettingTable">
+    <!-- Tab 2: 上游追查節點 (外部個人錢包、Relay、DEX 等) -->
+    <div class="drawer-content" id="tab-upstream">
+      <table class="data-table" id="upstreamTable">
         <thead>
           <tr>
+            <th>上游節點</th>
+            <th>節點類型</th>
+            <th>追查價值</th>
+            <th>經手資產金額</th>
             <th>時間 (UTC+8)</th>
-            <th>Polymarket 市場標題</th>
-            <th>下注選項</th>
-            <th>投入金額</th>
-            <th>份額 (Shares)</th>
-            <th>交易雜湊</th>
-            <th>解碼依據</th>
+            <th>節點地址</th>
+            <th>交易雜湊 (Tx)</th>
+            <th>上游追查方向說明</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="7" style="text-align:center; color:#64748b;">尚未執行查詢或無下注紀錄。</td></tr>
+          <tr><td colspan="8" style="text-align:center; color:#64748b;">尚未執行查詢或無上游追查節點。</td></tr>
         </tbody>
       </table>
     </div>
@@ -218,7 +272,27 @@
       </table>
     </div>
 
-    <!-- Tab 4: 查詢狀態與稽核軌道 (揭露各幣別歷史完整性) -->
+    <!-- Tab 4: 投注解碼 -->
+    <div class="drawer-content" id="tab-betting">
+      <table class="data-table" id="bettingTable">
+        <thead>
+          <tr>
+            <th>時間 (UTC+8)</th>
+            <th>Polymarket 市場標題</th>
+            <th>下注選項</th>
+            <th>投入金額</th>
+            <th>份額 (Shares)</th>
+            <th>交易雜湊</th>
+            <th>解碼依據</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" style="text-align:center; color:#64748b;">尚未執行查詢或無下注紀錄。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Tab 5: 查詢狀態與稽核軌道 (揭露各幣別歷史完整性) -->
     <div class="drawer-content" id="tab-audit">
       <table class="data-table" id="auditTable">
         <thead>
@@ -237,10 +311,11 @@
       </table>
     </div>
 
-    <!-- Tab 5: 法證文字報告 -->
+    <!-- Tab 6: 法證文字報告 -->
     <div class="drawer-content" id="tab-report" style="padding: 14px;">
       <pre id="reportTextContent" style="font-family: var(--font-mono); font-size: 11px; color: #cbd5e1; white-space: pre-wrap; line-height: 1.6;"></pre>
     </div>
+  </div>
   </div>
 
   <!-- 底部狀態列 -->

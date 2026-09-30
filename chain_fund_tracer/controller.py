@@ -56,7 +56,7 @@ class Controller:
             "settings": {
                 "rpc_url": self.settings.rpc_url,
                 "blockscout_url": self.settings.blockscout_url,
-                "etherscan_api_key": self.settings.etherscan_api_key,
+                "has_etherscan_api_key": bool(self.settings.etherscan_api_key.strip()),
                 "orbscan_api_url": getattr(self.settings, "orbscan_api_url", ""),
                 "max_hops": self.settings.max_hops,
                 "page_size": self.settings.page_size,
@@ -70,7 +70,11 @@ class Controller:
         """儲存並套用使用者設定。"""
         try:
             for key, val in new_settings.items():
-                if hasattr(self.settings, key):
+                if key == "etherscan_api_key":
+                    val_str = str(val).strip()
+                    if val_str:  # 僅在明確提供新金鑰時才覆寫
+                        self.settings.etherscan_api_key = val_str
+                elif hasattr(self.settings, key):
                     if key in ("max_hops", "page_size", "max_history_pages"):
                         setattr(self.settings, key, int(val))
                     elif key == "core_inbound_tokens" and isinstance(val, list):
@@ -278,10 +282,65 @@ class Controller:
             return {"success": False, "error": f"匯出失敗：{exc}"}
 
     # ==========================
-    # 外部工具輔助
+    # 外部工具輔助（嚴格白名單防護）
     # ==========================
 
-    def open_external(self, url: str) -> None:
-        """以系統預設瀏覽器開啟超連結。"""
-        if url and (url.startswith("http://") or url.startswith("https://")):
-            webbrowser.open(url)
+    ALLOWED_HOSTS = {
+        "polygonscan.com",
+        "etherscan.io",
+        "bscscan.com",
+        "arbiscan.io",
+        "optimistic.etherscan.io",
+        "basescan.org",
+        "tronscan.org",
+        "polymarket.com",
+    }
+
+    def open_external(self, url: str) -> bool:
+        """以系統預設瀏覽器開啟合法的鏈上瀏覽器超連結（嚴格白名單與 HTTPS 協議驗證）。"""
+        if not url:
+            return False
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url.strip())
+            if parsed.scheme.lower() != "https":
+                return False
+            hostname = (parsed.hostname or "").lower()
+            # 檢查 hostname 是否屬於白名單網域或其子網域
+            is_allowed = any(
+                hostname == allowed or hostname.endswith("." + allowed)
+                for allowed in self.ALLOWED_HOSTS
+            )
+            if is_allowed:
+                webbrowser.open(url)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def open_explorer(self, chain_id: int | str, item_type: str, item_value: str) -> bool:
+        """由後端依據鏈別與標的類型安全產生 Explorer 網址並開啟。"""
+        val = str(item_value or "").strip()
+        itype = str(item_type or "").strip().lower()
+        if not val or itype not in ("tx", "address"):
+            return False
+
+        try:
+            cid = int(chain_id)
+        except (ValueError, TypeError):
+            cid = 137
+
+        base_urls = {
+            1: "https://etherscan.io",
+            56: "https://bscscan.com",
+            137: "https://polygonscan.com",
+            42161: "https://arbiscan.io",
+            10: "https://optimistic.etherscan.io",
+            8453: "https://basescan.org",
+            728126428: "https://tronscan.org/#",
+        }
+        base = base_urls.get(cid, "https://polygonscan.com")
+        path_part = "transaction" if cid == 728126428 and itype == "tx" else ("tx" if itype == "tx" else "address")
+        safe_url = f"{base}/{path_part}/{val}"
+        return self.open_external(safe_url)
+

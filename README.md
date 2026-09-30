@@ -32,11 +32,21 @@
 ## Windows 執行
 
 1. 安裝 [Python 3.11 以上](https://www.python.org/downloads/windows/)，安裝時勾選 **Add Python to PATH**。
-2. 直接雙擊 `run.bat`。
-3. 在左欄輸入交易雜湊或錢包地址，選擇追蹤跳數，按「追蹤 Polymarket 資金鏈」或「一般資金追蹤」。
-4. 在中欄「資金流程圖」由上到下沿箭頭查看資金時間序列；點選箭頭可於右欄「證據詳情」即時核對查核結論、發送地址（Transfer From）、收款地址（Transfer To）、Tx Hash、摘要、標籤、信心與限制；其他技術欄位（區塊、Log Index、Token 合約、Request ID）可按需展開。「文字明細」保留原始逐筆內容。
+2. 安裝核心依賴套件（HTML 現代化工作台所需）：
+   ```powershell
+   py -3 -m pip install -r requirements.txt
+   ```
+3. 執行程式：雙擊 `run.bat` 或在命令列執行 `python app.py`。
+4. 系統將以原生視窗開啟現代化法證工作台（PyWebView 架構，零外網直連 RPC，本機安全沙箱隔離，XSS 嚴格防護）。
+5. 在左欄輸入交易雜湊或錢包地址（支援直接貼上 PolygonScan 網址），可選填時間錨定或歷史 CSV 索引，點擊「🚀 開始法證追查」。
+6. 查核結果展示：
+   - **本案初步結論摘要橫幅**：頂部即時顯示可函調 KYC 服務商總數、逐筆本金主線條數、跨鏈段數與 4 軌歷史檢索完整性。
+   - **可互動 SVG 資金圖譜**：支援畫布平移（Pan）、滾輪縮放（Zoom）、視野自適應置中（Fit to View）、箭頭金額防疊錯位與 5 大色彩圖例。
+   - **右欄法證詳情卡片**：點選流程圖之箭頭或節點，或由系統預設自動選取最高優先之「交易所直提／逐筆本金」步驟，檢視完整法證核對與法定限制。
+   - **底欄 6 大專業資料抽屜**：高優先展示「🏛️ 可函調服務商」，次分流「🔍 上游追查節點」、「🛣️ 入金路徑」、「🎯 投注解碼」、「📜 4 軌查詢狀態」與「📄 法證文字報告」。
+   - **一鍵整合匯出**：點擊頂端「📥 匯出法證文件 ▾」，可一鍵匯出完整證據包 ZIP（含 SHA-256 清冊）、函調候選清單 CSV、步驟清冊 CSV、文字報告 TXT 或 SVG 流程圖。
 
-如要反查下注本金，可貼入**下注交易雜湊**或 **Polymarket 錢包地址**後按「Polymarket／Relay 資金鏈」。結果中的「下注前補款／地址入金」是候選資金池；「pUSD 底層入金」是鑄造 pUSD 時真正投入 USDC 的地址；「Relay 來源鏈」才是跨鏈前的原始交易。工具會將 Polymarket Exchange、Onramp、Reward Distributor、pUSD 合約、Relay Solver 與零地址鑄造分開標示，不會把它們誤當交易所來源。
+如要反查下注本金，可貼入**下注交易雜湊**或 **Polymarket 錢包地址**後按「Polymarket 資金鏈穿透」。結果中的「下注前補款／地址入金」是候選資金池；「pUSD 底層入金」是鑄造 pUSD 時真正投入 USDC 的地址；「Relay 來源鏈」才是跨鏈前的原始交易。工具會將 Polymarket Exchange、Onramp、Reward Distributor、pUSD 合約、Relay Solver 與零地址鑄造分開標示，不會把它們誤當交易所來源。
 
 預設使用 `https://polygon.drpc.org` 與 `https://polygon.blockscout.com/api/v2`，Polygon RPC 失敗時會依序嘗試公開備援端點。可在「設定」改用機關核准的 RPC 或 Explorer。Relay API Key 為選填，填入後優先使用 v3；未填時暫以免金鑰 v2 相容介面查詢。BNB Chain 來源鏈會優先使用 BNBScan 公開 REST API 查詢 Token 與原生 BNB 入帳；若該索引回傳 0 筆或連線失敗，會改以 Relay 來源 Tx 為錨點，向前查核 BNB Chain 原始區塊 Receipt 與地址交易，再續追穩定幣、DEX 兌換與原生 BNB 入金。TRON 來源鏈則使用 Tronscan 公開 TRC-20 API，兩者都不必填 API Key。其他缺少免金鑰 Explorer 的來源鏈才需要選填 Etherscan V2 API Key。金鑰只存放在程式同目錄的 `settings.json`，不得硬編碼、交付或上傳。摘要將「Relay 來源鏈／地址／資產」與「上游命中交易所公開標籤」分開顯示，避免把 BNB Chain 網路誤解為 Binance 交易所。
 
@@ -86,4 +96,4 @@
 py -3 -m unittest discover -s tests -v
 ```
 
-全案目前包含 **112 項單元測試**（涵蓋分析邏輯、時間錨定、跨鏈穿透、CSV 投注候選、投注語意精確配對、歷史查詢範圍、SVG 匯出、GUI 佈局、Provider 健全性防禦、法證入金路徑分類、函調候選清單提煉、個人錢包遞迴向上追查、初始 POL 燃料開戶來源穿透、模型序列化與 PyWebView Controller 初始化），執行結果應為全部 `OK` 通過。
+全案目前包含 **114 項單元測試**（涵蓋分析邏輯、時間錨定、跨鏈穿透、CSV 投注候選、投注語意精確配對、歷史查詢範圍、SVG 匯出、GUI 佈局、Provider 健全性防禦、法證入金路徑分類、函調候選清單提煉、個人錢包遞迴向上追查、歷史最早 POL 燃料開戶來源排序檢驗、EOA 逐筆本金嚴格分級與金額不符降級防護、模型序列化與 PyWebView Controller 初始化），無桌面環境下自動略過 Tkinter 視窗測試，執行結果應為全數 `OK` 通過。

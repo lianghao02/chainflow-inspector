@@ -581,3 +581,181 @@ input:focus, select:focus, textarea:focus {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ==========================================================================
+   本案初步結論摘要橫幅 (Summary Banner)
+   ========================================================================== */
+.summary-banner {
+  background: linear-gradient(90deg, #101923 0%, #16202e 100%);
+  border-bottom: 1px solid #2a3b50;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  z-index: 5;
+}
+
+.summary-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--accent-amber);
+}
+
+.summary-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.summary-pill-label {
+  color: var(--text-muted);
+}
+
+.summary-pill-value {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.summary-pill-value.highlight {
+  color: var(--accent-amber);
+}
+
+/* ==========================================================================
+   流程圖畫布上方圖例列 (Legend Bar)
+   ========================================================================== */
+.legend-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  background: rgba(18, 24, 32, 0.8);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-color-box {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* ==========================================================================
+   4 軌稽核直觀狀態徽章 (Track Badges)
+   ========================================================================== */
+.track-badges-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.track-badge-card {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.track-badge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+
+.track-badge-status {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.track-badge-status.ok {
+  background: #064e3b;
+  color: #34d399;
+}
+
+.track-badge-status.warn {
+  background: #78350f;
+  color: #fbbf24;
+}
+
+.track-badge-status.err {
+  background: #7f1d1d;
+  color: #f87171;
+}
+
+/* ==========================================================================
+   下拉選單 (Dropdown Menu)
+   ========================================================================== */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
+  min-width: 170px;
+  z-index: 50;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dropdown-menu.show {
+  display: flex;
+}
+
+.dropdown-item {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.dropdown-item:hover {
+  background-color: var(--bg-card-hover);
+  color: var(--accent-blue);
+}
+

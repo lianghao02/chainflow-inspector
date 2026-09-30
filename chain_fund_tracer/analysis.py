@@ -179,11 +179,16 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
             if not service_provider:
                 service_provider = lbl or "未具名交易所"
             service_type = "中心化交易所"
-            inquiry_value = "可函調 KYC"
+
             if step.event_role == "手續費供資":
-                limitations = "交易所燃料手續費出金；非逐筆本金，但為該個人錢包開戶／手續費出資來源，可向交易所調取該筆提幣帳戶 KYC。"
+                inquiry_value = "可函調 KYC"
+                limitations = "交易所燃料手續費出金；非逐筆下注本金，但為該個人錢包開戶／手續費出資來源，可向交易所調取該筆提幣帳戶 KYC。"
+            elif step.line_style == "solid":
+                inquiry_value = "可函調 KYC"
+                limitations = "交易所出金熱錢包；金額與時間核對吻合，需向交易所調取該筆提幣 UID、登入 IP 與 KYC 身分。"
             else:
-                limitations = "交易所出金熱錢包；非個人專屬充值地址，需向交易所調取該筆提幣 UID、登入 IP 與 KYC 身分。"
+                inquiry_value = "僅供上游追蹤"
+                limitations = "上游交易所較早轉入紀錄；非逐筆本金（金額不符、時間間隔或餘額混合），僅供上游關聯追蹤，不可直接推定為本案下注資金。"
 
         elif cat == "法幣／信用卡入金服務商":
             for sp in ("MoonPay", "Simplex", "Transak", "Banxa", "Ramp Network"):
@@ -1373,7 +1378,7 @@ class Analyzer:
         cutoff: float = 0.0,
         hop: int = 2,
     ) -> bool:
-        """查核非託管個人錢包之原生 POL 手續費開戶出資來源（若來自交易所則直接鎖定調證對象）。"""
+        """查核非託管個人錢包之原生 POL 手續費開戶出資來源（依區塊高度取歷史最早有效轉入；命中交易所則列為輔助調證對象）。"""
         norm_eoa = normalize(eoa_address)
         if not norm_eoa or norm_eoa in POLYMARKET_INTERNAL | {ZERO_ADDRESS}:
             return False
@@ -1397,55 +1402,69 @@ class Analyzer:
             t_time = t.get("timestamp", "")
             if cutoff and event_timestamp(t_time) >= cutoff:
                 continue
-            valid_transfers.append(t)
-
-        if not valid_transfers:
-            return False
-
-        for t in valid_transfers:
             t_recipient = event_address(t.get("to"))
             if t_recipient and normalize(t_recipient) != norm_eoa:
                 continue
             f_sender = event_address(t.get("from"))
             if normalize(f_sender) in POLYMARKET_INTERNAL | {ZERO_ADDRESS, norm_eoa}:
                 continue
-            f_lbl = event_label(t.get("from"))
-            f_hash = t.get("hash", "")
-            if not f_lbl and f_hash:
-                tx_dtl = self.provider.transaction_details(f_hash)
-                if tx_dtl:
-                    f_lbl = event_label(tx_dtl.get("from"))
+            valid_transfers.append(t)
 
-            kind, label, label_source, confidence = self.classify(f_sender, f_lbl)
-            lbl_lower = (label or f_lbl or "").lower()
-            is_exchange = (
-                kind == "交易所"
-                or any(kw in lbl_lower for kw in ("binance", "okx", "bybit", "bitget", "coinbase", "kraken", "max exchange", "bitopro", "mexc", "gate.io"))
+        if not valid_transfers:
+            return False
+
+        # 關鍵法證校核：依照區塊高度升序排序，精確取歷史最早的一筆原生代幣轉入
+        def _get_sort_key(tx_item):
+            blk = tx_item.get("block_number", tx_item.get("blockNumber", 0))
+            try:
+                blk_num = int(str(blk), 16) if str(blk).startswith("0x") else int(blk)
+            except (ValueError, TypeError):
+                blk_num = 0
+            ts = event_timestamp(tx_item.get("timestamp", ""))
+            return (blk_num, ts)
+
+        valid_transfers.sort(key=_get_sort_key)
+        earliest_tx = valid_transfers[0]
+
+        f_sender = event_address(earliest_tx.get("from"))
+        f_lbl = event_label(earliest_tx.get("from"))
+        f_hash = earliest_tx.get("hash", "")
+        if not f_lbl and f_hash:
+            tx_dtl = self.provider.transaction_details(f_hash)
+            if tx_dtl:
+                f_lbl = event_label(tx_dtl.get("from"))
+
+        kind, label, label_source, confidence = self.classify(f_sender, f_lbl)
+        lbl_lower = (label or f_lbl or "").lower()
+        is_exchange = (
+            kind == "交易所"
+            or any(kw in lbl_lower for kw in ("binance", "okx", "bybit", "bitget", "coinbase", "kraken", "max exchange", "bitopro", "mexc", "gate.io"))
+        )
+
+        if is_exchange:
+            val_pol = earliest_tx.get("value", "0")
+            tx_time = earliest_tx.get("timestamp", "")
+            gas_note = (
+                f"初始 POL 手續費開戶出資來源（輔助線索）：依區塊高度歷史最早轉入紀錄確認，"
+                f"{label or '中心化交易所'} 曾向個人錢包 {eoa_address[:10]}… 轉入原生 POL 作為燃料手續費；"
+                "非本案逐筆下注本金，但為該個人錢包開戶／手續費出資來源，可持此 Tx 向交易所調取帳戶提幣帳號與 KYC。"
             )
-
-            if is_exchange:
-                val_pol = t.get("value", "0")
-                tx_time = t.get("timestamp", "")
-                gas_note = (
-                    f"原生 POL 供資關聯（開戶燃料來源）：{label or '中心化交易所'} 曾向個人錢包 {eoa_address[:10]}… 轉入原生 POL 作為燃料手續費；"
-                    "非本案下注本金，但為該個人錢包開戶／手續費出資來源，可持此 Tx 向交易所調取帳戶提幣帳號與 KYC。"
+            step_gas = TraceStep(
+                "手續費供資", hop, f_hash, timestamp_to_text(tx_time),
+                "POL", str(val_pol), f_sender, eoa_address, f_sender,
+                "交易所", label or "中心化交易所", label_source or "Explorer 原生交易索引", confidence or "高度可能",
+                "僅資金關聯", gas_note,
+                chain="Polygon", block_number=str(earliest_tx.get("block_number", "")), log_index="",
+                path_role="入金", event_role="手續費供資", explorer_url=f"https://polygonscan.com/tx/{f_hash}",
+                chain_id=137, evidence_source="Explorer 原生交易索引",
+                line_style="dotted",
+            )
+            if not any(s.tx_hash == f_hash and s.event_role == "手續費供資" for s in result.steps):
+                result.steps.append(step_gas)
+                result.summary.append(
+                    f"【手續費開戶來源】個人錢包 {eoa_address[:10]}… 歷史最早原生 POL 燃料來自交易所：{label}（{val_pol} POL，Tx：{f_hash}）"
                 )
-                step_gas = TraceStep(
-                    "手續費供資", hop, f_hash, timestamp_to_text(tx_time),
-                    "POL", str(val_pol), f_sender, eoa_address, f_sender,
-                    "交易所", label or "中心化交易所", label_source or "Explorer 原生交易索引", confidence or "高度可能",
-                    "僅資金關聯", gas_note,
-                    chain="Polygon", block_number=str(t.get("block_number", "")), log_index="",
-                    path_role="入金", event_role="手續費供資", explorer_url=f"https://polygonscan.com/tx/{f_hash}",
-                    chain_id=137, evidence_source="Explorer 原生交易索引",
-                    line_style="dotted",
-                )
-                if not any(s.tx_hash == f_hash and s.event_role == "手續費供資" for s in result.steps):
-                    result.steps.append(step_gas)
-                    result.summary.append(
-                        f"【手續費開戶來源】個人錢包 {eoa_address[:10]}… 原生 POL 燃料來自交易所：{label}（{val_pol} POL，Tx：{f_hash}）"
-                    )
-                return True
+            return True
         return False
 
     def _append_eoa_recursive_upstream(
@@ -1460,8 +1479,9 @@ class Analyzer:
         seen: set[str] | None = None,
     ) -> None:
         """非託管個人錢包（EOA）自動向上遞迴追查：
-        1. 自動查核該錢包之初始原生 POL 燃料來源（命中交易所則鎖定調證對象）
-        2. 自動向上檢索穩定幣入金來源，逐跳遞迴，直到命中交易所或達到最大跳數
+        1. 自動查核該錢包之初始原生 POL 燃料來源（依區塊高度歷史最早有效入帳）
+        2. 嚴格核對幣別、金額與時間窗，將入金分為「逐筆本金候選」與「較早資金關聯」，避免無關入金誤列本金
+        3. 逐跳遞迴，直到命中交易所或達到最大跳數
         """
         if seen is None:
             seen = set()
@@ -1472,7 +1492,7 @@ class Analyzer:
 
         self.progress(f"正在向上追查個人錢包 {eoa_address[:10]}… 之資金來源（第 {current_hop} 跳）…")
 
-        # 1. 優先查核該個人錢包的原生 POL 燃料開戶出資來源
+        # 1. 優先查核該個人錢包歷史最早的原生 POL 燃料開戶出資來源
         self._inspect_initial_gas_funder(result, eoa_address, cutoff=cutoff, hop=current_hop)
 
         # 2. 向上追查穩定幣入金來源
@@ -1509,11 +1529,57 @@ class Analyzer:
                 or any(kw in lbl_lower for kw in ("binance", "okx", "bybit", "bitget", "coinbase", "kraken", "max exchange", "bitopro", "mexc", "gate.io"))
             )
 
+            # 嚴格分級核對：
+            # A. 幣別核對
+            is_same_token = not expected_token or (item_token.upper() == expected_token.upper())
+
+            # B. 金額核對（同額或在容差範圍內涵蓋轉出金額）
+            is_amount_matching = False
+            try:
+                amt_in = float(item_amount)
+                if expected_amount:
+                    amt_exp = float(expected_amount)
+                    # 容差：入帳金額足額且在合理倍數內 (95% ~ 130%) 或相差極小
+                    if amt_exp * 0.95 <= amt_in <= max(amt_exp * 1.30, amt_exp + 50):
+                        is_amount_matching = True
+                else:
+                    is_amount_matching = True
+            except (ValueError, TypeError):
+                is_amount_matching = False
+
+            # C. 時間窗核對（必須在轉出之前，且在 30 天內緊鄰）
+            item_ts = event_timestamp(item_time)
+            is_time_close = True
+            if cutoff and item_ts:
+                diff_sec = cutoff - item_ts
+                if diff_sec < 0 or diff_sec > 30 * 86400:
+                    is_time_close = False
+
+            # 只有同時滿足幣別相符、金額核對相符且時間緊鄰，才列為逐筆本金候選
+            is_principal_candidate = is_same_token and is_amount_matching and is_time_close
+
             if is_exchange:
-                direct_note = (
-                    f"上游命中中心化交易所直提：{source_label or '交易所'}；"
-                    f"為個人錢包 {eoa_address[:10]}… 之本金來源，可持此 Tx 向交易所調取該筆提幣帳戶 KYC。"
-                )
+                if is_principal_candidate:
+                    direct_note = (
+                        f"上游命中中心化交易所直提（逐筆本金候選）：{source_label or '交易所'}；"
+                        f"金額（{item_amount} {item_token}）與時間緊鄰核對相符，為個人錢包 {eoa_address[:10]}… 之本金來源，可持此 Tx 向交易所調取提幣帳戶 KYC。"
+                    )
+                    line_style = "solid"
+                    pair_ver = True
+                    result.summary.append(
+                        f"【本金上游來源】個人錢包 {eoa_address[:10]}… 之本金來自交易所：{source_label}（{item_amount} {item_token}，Tx：{item_hash}）"
+                    )
+                else:
+                    direct_note = (
+                        f"上游交易所較早轉入紀錄（上游追蹤線索／非逐筆本金）：{source_label or '交易所'} 曾有出金至該錢包；"
+                        f"但因金額不符、時間間隔過大或鏈上帳戶餘額混合，非本案逐筆唯一對應；僅供司法警察作為上游關聯帳戶追蹤，不可直接推定為本案下注資金。"
+                    )
+                    line_style = "dashed"
+                    pair_ver = False
+                    result.summary.append(
+                        f"【上游追蹤線索】個人錢包 {eoa_address[:10]}… 曾有交易所入帳：{source_label}（{item_amount} {item_token}，較早關聯／非逐筆本金）"
+                    )
+
                 step_direct = TraceStep(
                     "來源鏈上游", current_hop, item_hash, timestamp_to_text(item_time),
                     item_token, item_amount, intermediate_addr, eoa_address, intermediate_addr,
@@ -1522,15 +1588,14 @@ class Analyzer:
                     chain="Polygon", block_number=str(item_block), log_index="",
                     path_role="入金", event_role="轉帳", explorer_url=f"https://polygonscan.com/tx/{item_hash}",
                     chain_id=137, evidence_source="Explorer Token Transfers 索引",
-                    line_style="solid",
+                    line_style=line_style,
                 )
+                step_direct.pair_verified = pair_ver
                 result.steps.append(step_direct)
-                result.summary.append(
-                    f"【本金上游來源】個人錢包 {eoa_address[:10]}… 之本金來自交易所：{source_label}（{item_amount} {item_token}，Tx：{item_hash}）"
-                )
             else:
+                line_style = "solid" if is_principal_candidate else "dashed"
                 eoa_note = (
-                    f"上游非託管個人錢包轉入（第 {current_hop} 跳）；"
+                    f"上游非託管個人錢包轉入（第 {current_hop} 跳，{'逐筆本金線' if is_principal_candidate else '較早關聯'}）；"
                     f"資金由 {intermediate_addr[:10]}… 轉至 {eoa_address[:10]}…，需持續向上追查其出資來源。"
                 )
                 step_eoa = TraceStep(
@@ -1541,8 +1606,9 @@ class Analyzer:
                     chain="Polygon", block_number=str(item_block), log_index="",
                     path_role="入金", event_role="轉帳", explorer_url=f"https://polygonscan.com/tx/{item_hash}",
                     chain_id=137, evidence_source="Explorer Token Transfers 索引",
-                    line_style="solid",
+                    line_style=line_style,
                 )
+                step_eoa.pair_verified = is_principal_candidate
                 result.steps.append(step_eoa)
 
                 if current_hop < max_hops:

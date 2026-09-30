@@ -1,2 +1,6 @@
-# 執行工具不需第三方套件。
-# 若要封裝 Windows 執行檔：py -m pip install pyinstaller
+# 核心依賴套件（HTML 現代化工作台）
+pywebview>=5.0.0,<6.0.0
+
+# 選擇性開發與打包工具
+# 若要封裝 Windows 獨立執行檔：py -m pip install pyinstaller
+

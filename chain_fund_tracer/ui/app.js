@@ -1,5 +1,6 @@
 /**
  * Chain Fund Tracer - 主工作台前端邏輯 (app.js)
+ * 遵循安全法證標準：全面杜絕 XSS 外部腳本注入、DOM 安全構建、支援 6 大分層頁籤與摘要橫幅。
  */
 
 let flowGraph = null;
@@ -46,6 +47,80 @@ function updateStatus(text, isBusy) {
   }
 }
 
+// ==========================
+// 安全輔助工具（防禦 XSS）
+// ==========================
+
+function escapeHtml(text) {
+  if (text === null || text === undefined) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function createTextElement(tag, text, className) {
+  const el = document.createElement(tag);
+  if (text !== undefined && text !== null) {
+    el.textContent = String(text);
+  }
+  if (className) {
+    el.className = className;
+  }
+  return el;
+}
+
+function createTxLink(txHash, chainId = 137, displayText = null) {
+  const a = document.createElement('a');
+  a.href = '#';
+  a.className = 'mono safe-explorer-link';
+  a.style.color = '#38bdf8';
+  a.style.textDecoration = 'underline';
+  a.textContent = displayText || (txHash ? `${txHash.slice(0, 10)}...` : '檢視');
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (window.pywebview && window.pywebview.api && txHash) {
+      window.pywebview.api.open_explorer(chainId, 'tx', txHash);
+    }
+  });
+  return a;
+}
+
+function createAddressLink(address, chainId = 137, label = '') {
+  const span = document.createElement('span');
+  span.className = 'mono';
+  if (!address) {
+    span.textContent = '—';
+    return span;
+  }
+  const a = document.createElement('a');
+  a.href = '#';
+  a.style.color = '#38bdf8';
+  a.textContent = `${address.slice(0, 8)}...${address.slice(-6)}`;
+  a.title = address;
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (window.pywebview && window.pywebview.api && address) {
+      window.pywebview.api.open_explorer(chainId, 'address', address);
+    }
+  });
+  span.appendChild(a);
+  if (label) {
+    const lblSpan = document.createElement('span');
+    lblSpan.style.color = '#fbbf24';
+    lblSpan.style.marginLeft = '4px';
+    lblSpan.textContent = `[${label}]`;
+    span.appendChild(lblSpan);
+  }
+  return span;
+}
+
+// ==========================
+// 事件監聽與控制器互動
+// ==========================
+
 function initEventListeners() {
   // 開始追查
   const startBtn = document.getElementById('startBtn');
@@ -72,7 +147,44 @@ function initEventListeners() {
 
   // 重設視角
   document.getElementById('resetViewBtn').addEventListener('click', () => {
-    flowGraph.resetView();
+    flowGraph.fitToView();
+  });
+
+  // 匯出下拉選單
+  const exportBtn = document.getElementById('exportDropdownBtn');
+  const exportMenu = document.getElementById('exportDropdownMenu');
+  if (exportBtn && exportMenu) {
+    exportBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      exportMenu.classList.toggle('show');
+    });
+    document.addEventListener('click', () => {
+      exportMenu.classList.remove('show');
+    });
+  }
+
+  // 匯出項目點擊
+  document.querySelectorAll('[data-export]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const exportType = btn.getAttribute('data-export');
+      if (exportMenu) exportMenu.classList.remove('show');
+      try {
+        updateStatus(`正在匯出 ${exportType}…`, true);
+        const res = await window.pywebview.api.export_report(exportType);
+        if (res.success) {
+          alert(`匯出成功！\n儲存路徑：${res.file_path}`);
+          updateStatus('匯出完成', false);
+        } else if (!res.cancelled) {
+          alert(`匯出失敗：${res.error}`);
+          updateStatus('匯出失敗', false);
+        } else {
+          updateStatus('已取消匯出', false);
+        }
+      } catch (err) {
+        alert(`匯出異常：${err}`);
+        updateStatus('匯出異常', false);
+      }
+    });
   });
 
   // 底欄抽屜頁籤切換
@@ -97,29 +209,6 @@ function initEventListeners() {
   document.getElementById('toggleDrawerBtn').addEventListener('click', () => {
     const drawer = document.getElementById('bottomDrawer');
     drawer.classList.toggle('collapsed');
-  });
-
-  // 匯出功能選單
-  document.querySelectorAll('[data-export]').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const exportType = btn.getAttribute('data-export');
-      try {
-        updateStatus(`正在匯出 ${exportType}…`, true);
-        const res = await window.pywebview.api.export_report(exportType);
-        if (res.success) {
-          alert(`匯出成功！\n儲存路徑：${res.file_path}`);
-          updateStatus('匯出完成', false);
-        } else if (!res.cancelled) {
-          alert(`匯出失敗：${res.error}`);
-          updateStatus('匯出失敗', false);
-        } else {
-          updateStatus('已取消匯出', false);
-        }
-      } catch (err) {
-        alert(`匯出異常：${err}`);
-        updateStatus('匯出異常', false);
-      }
-    });
   });
 }
 
@@ -208,186 +297,443 @@ async function handleStopTrace() {
 }
 
 // ==========================
-// 結果渲染器
+// 結果渲染器（完全防禦 XSS）
 // ==========================
 
 function renderAllResults(data) {
-  // 1. 流程圖
-  flowGraph.setData(data.steps || []);
-
-  // 2. 更新計數器徽章
-  const bettingSteps = (data.steps || []).filter((s) => s.path_category === 'Polymarket 平台內部回款／贖回' || s.event_role === '投注買賣');
-  const inboundSteps = (data.steps || []).filter((s) => s.path_role === '入金');
+  const steps = data.steps || [];
   const subpoenas = data.subpoena_candidates || [];
-  const tracks = Object.keys(data.query_tracks || {}).length;
+  const tracks = data.query_tracks || {};
 
-  document.getElementById('countBetting').textContent = bettingSteps.length;
+  // 1. 流程圖
+  flowGraph.setData(steps);
+
+  // 2. 調證候選分流：可函調 KYC 服務商 vs 上游追查節點
+  const kycCandidates = subpoenas.filter((c) => c.inquiry_value === '可函調 KYC');
+  const upstreamCandidates = subpoenas.filter((c) => c.inquiry_value !== '可函調 KYC');
+
+  const bettingSteps = steps.filter((s) => s.path_category === 'Polymarket 平台內部回款／贖回' || s.event_role === '投注買賣');
+  const inboundSteps = steps.filter((s) => s.path_role === '入金');
+
+  // 3. 更新頁籤計數器徽章
+  document.getElementById('countSubpoena').textContent = kycCandidates.length;
+  document.getElementById('countUpstream').textContent = upstreamCandidates.length;
   document.getElementById('countInbound').textContent = inboundSteps.length;
-  document.getElementById('countSubpoena').textContent = subpoenas.length;
-  document.getElementById('countAudit').textContent = tracks;
+  document.getElementById('countBetting').textContent = bettingSteps.length;
+  document.getElementById('countAudit').textContent = Object.keys(tracks).length;
 
-  // 3. 渲染各頁籤表格
-  renderBettingTable(bettingSteps);
+  // 4. 渲染頂部「本案初步結論」摘要橫幅
+  renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps);
+
+  // 5. 渲染 4 軌狀態徽章
+  renderTrackBadges(tracks);
+
+  // 6. 渲染各頁籤表格（DOM 安全構建）
+  renderKycTable(kycCandidates);
+  renderUpstreamTable(upstreamCandidates);
   renderInboundTable(inboundSteps);
-  renderSubpoenaTable(subpoenas);
-  renderAuditTable(data.query_tracks || {});
+  renderBettingTable(bettingSteps);
+  renderAuditTable(tracks);
   renderReportText(data);
+
+  // 7. 預設選取最高優先級之步驟（首選交易所直提/逐筆本金，非內部底層事件）
+  selectDefaultPriorityStep(steps);
 }
 
+function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
+  const kycEl = document.getElementById('sumKycCount');
+  const principalEl = document.getElementById('sumPrincipalCount');
+  const relayEl = document.getElementById('sumRelayCount');
+  const upstreamEl = document.getElementById('sumUpstreamCount');
+  const trackEl = document.getElementById('sumTrackStatus');
+
+  if (kycCandidates.length > 0) {
+    const providers = Array.from(new Set(kycCandidates.map((c) => c.service_provider))).join('、');
+    kycEl.textContent = `${providers} (${kycCandidates.length})`;
+    kycEl.classList.add('highlight');
+  } else {
+    kycEl.textContent = '尚未命中交易所';
+    kycEl.classList.remove('highlight');
+  }
+
+  const principalCount = steps.filter((s) => s.line_style === 'solid' && s.event_role !== '手續費供資' && s.path_role === '入金').length;
+  principalEl.textContent = `${principalCount} 條`;
+
+  const relayCount = steps.filter((s) => s.path_category === '跨鏈橋／Relay' || Boolean(s.relay_request_id)).length;
+  relayEl.textContent = `${relayCount} 段`;
+
+  upstreamEl.textContent = `${upstreamCandidates.length} 個`;
+
+  const tracks = data.query_tracks || {};
+  const hasTruncated = Object.values(tracks).some((t) => t.is_truncated);
+  const hasError = Object.values(tracks).some((t) => t.status === 'error');
+  if (hasError) {
+    trackEl.textContent = '部分查詢異常';
+    trackEl.style.color = '#f87171';
+  } else if (hasTruncated) {
+    trackEl.textContent = '4 軌已查（部分歷史達上限）';
+    trackEl.style.color = '#fbbf24';
+  } else {
+    trackEl.textContent = 'USDC/USDC.e/pUSD/USDT 完整';
+    trackEl.style.color = '#34d399';
+  }
+}
+
+function renderTrackBadges(tracks) {
+  const mapping = [
+    { key: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', statusId: 'status-usdc', subId: 'sub-usdc', name: 'USDC' },
+    { key: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', statusId: 'status-usdce', subId: 'sub-usdce', name: 'USDC.e' },
+    { key: '0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb', statusId: 'status-pusd', subId: 'sub-pusd', name: 'pUSD' },
+    { key: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', statusId: 'status-usdt', subId: 'sub-usdt', name: 'USDT' },
+  ];
+
+  mapping.forEach((item) => {
+    const statusEl = document.getElementById(item.statusId);
+    const subEl = document.getElementById(item.subId);
+    if (!statusEl) return;
+
+    const t = tracks[item.key] || tracks[item.key.toLowerCase()];
+    if (!t) {
+      statusEl.textContent = '未啟用';
+      statusEl.className = 'track-badge-status';
+      return;
+    }
+
+    if (t.status === 'error') {
+      statusEl.textContent = '查詢失敗';
+      statusEl.className = 'track-badge-status err';
+    } else if (t.is_truncated) {
+      statusEl.textContent = `達上限 (${t.items_count}筆)`;
+      statusEl.className = 'track-badge-status warn';
+    } else {
+      statusEl.textContent = `完成 (${t.items_count}筆)`;
+      statusEl.className = 'track-badge-status ok';
+    }
+
+    if (subEl && t.min_block) {
+      subEl.textContent = `區塊 ${t.min_block}～${t.max_block}`;
+    }
+  });
+}
+
+function selectDefaultPriorityStep(steps) {
+  if (!steps || steps.length === 0) return;
+
+  // 優先級：
+  // 1. 交易所直提且為 solid 本金線
+  // 2. 任何可函調 KYC 步驟
+  // 3. Relay 來源鏈入金
+  // 4. solid 入金線
+  // 5. 第一筆
+  const priorityStep =
+    steps.find((s) => s.path_category === '交易所直提' && s.line_style === 'solid') ||
+    steps.find((s) => s.classification === '交易所' && s.line_style === 'solid') ||
+    steps.find((s) => s.event_role === '手續費供資') ||
+    steps.find((s) => s.path_category === '跨鏈橋／Relay') ||
+    steps.find((s) => s.line_style === 'solid' && s.path_role === '入金') ||
+    steps[0];
+
+  if (priorityStep) {
+    renderStepDetail(priorityStep);
+    flowGraph.selectStepByObject(priorityStep);
+  }
+}
+
+// 渲染右欄法證詳情卡片（DOM 安全構建，防禦 XSS）
 function renderStepDetail(step) {
   const container = document.getElementById('detailBody');
   if (!container) return;
+  container.textContent = ''; // 清空
 
   let badgeCls = 'badge-dashed';
   if (step.line_style === 'solid') badgeCls = 'badge-solid';
   if (step.classification === '交易所' || step.path_category === '交易所直提') badgeCls = 'badge-vasp';
   if (step.classification === 'Bridge' || step.path_category === '跨鏈橋／Relay') badgeCls = 'badge-bridge';
 
-  container.innerHTML = `
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">路徑分類與性質</div>
-      <div class="evidence-kv-val">
-        <span class="badge ${badgeCls}">${step.path_category || '未能分類'}</span>
-        <span style="margin-left: 6px; font-weight:600;">${step.direction || ''} 第 ${step.hop || 0} 跳</span>
-      </div>
-    </div>
+  // 1. 路徑分類與性質
+  const kv1 = createKvRow('路徑分類與性質');
+  const spanBadge = createTextElement('span', step.path_category || '未能分類', `badge ${badgeCls}`);
+  kv1.val.appendChild(spanBadge);
+  const spanHop = createTextElement('span', ` ${step.direction || ''} 第 ${step.hop || 0} 跳`);
+  spanHop.style.marginLeft = '6px';
+  spanHop.style.fontWeight = '600';
+  kv1.val.appendChild(spanHop);
+  container.appendChild(kv1.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">資產與轉帳金額</div>
-      <div class="evidence-kv-val" style="font-size: 14px; font-weight: 700; color: #38bdf8;">
-        ${step.amount || '0'} ${step.token || ''}
-      </div>
-    </div>
+  // 2. 資產與金額
+  const kv2 = createKvRow('資產與轉帳金額');
+  kv2.val.style.fontSize = '14px';
+  kv2.val.style.fontWeight = '700';
+  kv2.val.style.color = '#38bdf8';
+  kv2.val.textContent = `${step.amount || '0'} ${step.token || ''}`;
+  container.appendChild(kv2.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">交易時間 (UTC+8)</div>
-      <div class="evidence-kv-val mono">${step.timestamp || '未收錄'}</div>
-    </div>
+  // 3. 交易時間
+  const kv3 = createKvRow('交易時間 (UTC+8)');
+  kv3.val.className = 'evidence-kv-val mono';
+  kv3.val.textContent = step.timestamp || '未收錄';
+  container.appendChild(kv3.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">來源地址 (From)</div>
-      <div class="evidence-kv-val mono">
-        ${step.from_address || ''}
-        ${step.label ? `<div style="color:#fbbf24; margin-top:2px;">標籤：${step.label} (${step.label_source || ''})</div>` : ''}
-      </div>
-    </div>
+  // 4. 來源地址 (From)
+  const kv4 = createKvRow('來源地址 (From)');
+  kv4.val.className = 'evidence-kv-val mono';
+  kv4.val.appendChild(createAddressLink(step.from_address, step.chain_id || 137, step.label));
+  container.appendChild(kv4.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">目標地址 (To)</div>
-      <div class="evidence-kv-val mono">${step.to_address || ''}</div>
-    </div>
+  // 5. 目標地址 (To)
+  const kv5 = createKvRow('目標地址 (To)');
+  kv5.val.className = 'evidence-kv-val mono';
+  kv5.val.appendChild(createAddressLink(step.to_address, step.chain_id || 137));
+  container.appendChild(kv5.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">交易雜湊 (Tx Hash)</div>
-      <div class="evidence-kv-val mono">
-        <a href="#" onclick="openTxUrl('${step.tx_hash}'); return false;" style="color:#38bdf8; text-decoration: underline;">
-          ${step.tx_hash}
-        </a>
-      </div>
-    </div>
+  // 6. 交易雜湊 (Tx Hash)
+  const kv6 = createKvRow('交易雜湊 (Tx Hash)');
+  kv6.val.className = 'evidence-kv-val mono';
+  kv6.val.appendChild(createTxLink(step.tx_hash, step.chain_id || 137, step.tx_hash));
+  container.appendChild(kv6.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">證據依據與配對狀態</div>
-      <div class="evidence-kv-val" style="font-size: 11px;">
-        <div>鏈別／區塊：${step.chain || 'Polygon'} ｜ 區塊 ${step.block_number || 'N/A'}</div>
-        <div>資料來源：${step.evidence_source || 'Explorer Token Transfers'}</div>
-        <div>精確配對：${step.pair_verified ? '✅ 已唯一配對' : '⚠️ 資金池關聯或未單獨閉環'}</div>
-      </div>
-    </div>
+  // 7. 證據依據與配對
+  const kv7 = createKvRow('證據依據與配對狀態');
+  kv7.val.style.fontSize = '11px';
+  const d1 = createTextElement('div', `鏈別／區塊：${step.chain || 'Polygon'} ｜ 區塊 ${step.block_number || 'N/A'}`);
+  const d2 = createTextElement('div', `資料來源：${step.evidence_source || 'Explorer 索引'}`);
+  const d3 = createTextElement('div', step.pair_verified ? '✅ 已唯一配對（逐筆本金）' : '⚠️ 資金池關聯或較早關聯（非逐筆）');
+  kv7.val.appendChild(d1);
+  kv7.val.appendChild(d2);
+  kv7.val.appendChild(d3);
+  container.appendChild(kv7.row);
 
-    <div class="evidence-kv">
-      <div class="evidence-kv-key">法證查核備註</div>
-      <div class="evidence-kv-val" style="color: #cbd5e1; font-size: 11px; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">
-        ${step.notes || '無特殊備註'}
-      </div>
-    </div>
-  `;
+  // 8. 法證查核備註
+  const kv8 = createKvRow('法證查核備註');
+  kv8.val.style.fontSize = '12px';
+  kv8.val.style.color = '#cbd5e1';
+  kv8.val.style.background = 'rgba(0,0,0,0.2)';
+  kv8.val.style.padding = '8px';
+  kv8.val.style.borderRadius = '4px';
+  kv8.val.textContent = step.notes || '無特殊備註';
+  container.appendChild(kv8.row);
 }
 
-function openTxUrl(txHash) {
-  if (window.pywebview && txHash) {
-    window.pywebview.api.open_external(`https://polygonscan.com/tx/${txHash}`);
+function createKvRow(keyTitle) {
+  const row = document.createElement('div');
+  row.className = 'evidence-kv';
+  const keyEl = createTextElement('div', keyTitle, 'evidence-kv-key');
+  const valEl = document.createElement('div');
+  valEl.className = 'evidence-kv-val';
+  row.appendChild(keyEl);
+  row.appendChild(valEl);
+  return { row, key: keyEl, val: valEl };
+}
+
+// 渲染 🏛️ 可函調 KYC 服務商表格
+function renderKycTable(candidates) {
+  const tbody = document.querySelector('#subpoenaTable tbody');
+  if (!tbody) return;
+  tbody.textContent = '';
+
+  if (candidates.length === 0) {
+    const tr = document.createElement('tr');
+    const td = createTextElement('td', '本案尚未命中具直接函調價值之中心化交易所或法幣入金商。');
+    td.colSpan = 8;
+    td.style.textAlign = 'center';
+    td.style.color = '#64748b';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
   }
+
+  candidates.forEach((c) => {
+    const tr = document.createElement('tr');
+
+    const tdProv = createTextElement('td', c.service_provider || '未標註交易所');
+    tdProv.style.fontWeight = '700';
+    tdProv.style.color = '#f0f6fc';
+
+    const tdType = createTextElement('td', c.service_type || '中心化交易所');
+
+    const tdVal = document.createElement('td');
+    const badge = createTextElement('span', c.inquiry_value || '可函調 KYC', 'badge badge-vasp');
+    tdVal.appendChild(badge);
+
+    const tdAmt = createTextElement('td', `${c.amount || '0'} ${c.asset || ''}`, 'mono');
+    tdAmt.style.color = '#38bdf8';
+    tdAmt.style.fontWeight = '600';
+
+    const tdTime = createTextElement('td', c.datetime_tw || '未收錄', 'mono');
+
+    const tdAddr = document.createElement('td');
+    tdAddr.appendChild(createAddressLink(c.from_address, 137));
+
+    const tdTx = document.createElement('td');
+    tdTx.appendChild(createTxLink(c.tx_hash, 137));
+
+    const tdNotes = createTextElement('td', c.limitations || '—');
+    tdNotes.style.color = '#94a3b8';
+    tdNotes.style.fontSize = '11px';
+
+    tr.appendChild(tdProv);
+    tr.appendChild(tdType);
+    tr.appendChild(tdVal);
+    tr.appendChild(tdAmt);
+    tr.appendChild(tdTime);
+    tr.appendChild(tdAddr);
+    tr.appendChild(tdTx);
+    tr.appendChild(tdNotes);
+    tbody.appendChild(tr);
+  });
+}
+
+// 渲染 🔍 上游追查節點表格
+function renderUpstreamTable(candidates) {
+  const tbody = document.querySelector('#upstreamTable tbody');
+  if (!tbody) return;
+  tbody.textContent = '';
+
+  if (candidates.length === 0) {
+    const tr = document.createElement('tr');
+    const td = createTextElement('td', '本案無其他待追查之上游節點。');
+    td.colSpan = 8;
+    td.style.textAlign = 'center';
+    td.style.color = '#64748b';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  candidates.forEach((c) => {
+    const tr = document.createElement('tr');
+
+    const tdProv = createTextElement('td', c.service_provider || '上游地址');
+    tdProv.style.fontWeight = '600';
+
+    const tdType = createTextElement('td', c.service_type || '個人錢包');
+
+    const tdVal = document.createElement('td');
+    const badge = createTextElement('span', c.inquiry_value || '僅供上游追蹤', 'badge badge-dashed');
+    tdVal.appendChild(badge);
+
+    const tdAmt = createTextElement('td', `${c.amount || '0'} ${c.asset || ''}`, 'mono');
+    const tdTime = createTextElement('td', c.datetime_tw || '未收錄', 'mono');
+
+    const tdAddr = document.createElement('td');
+    tdAddr.appendChild(createAddressLink(c.from_address, 137));
+
+    const tdTx = document.createElement('td');
+    tdTx.appendChild(createTxLink(c.tx_hash, 137));
+
+    const tdNotes = createTextElement('td', c.limitations || '—');
+    tdNotes.style.color = '#94a3b8';
+    tdNotes.style.fontSize = '11px';
+
+    tr.appendChild(tdProv);
+    tr.appendChild(tdType);
+    tr.appendChild(tdVal);
+    tr.appendChild(tdAmt);
+    tr.appendChild(tdTime);
+    tr.appendChild(tdAddr);
+    tr.appendChild(tdTx);
+    tr.appendChild(tdNotes);
+    tbody.appendChild(tr);
+  });
+}
+
+// 渲染 🛣️ 入金路徑表格
+function renderInboundTable(steps) {
+  const tbody = document.querySelector('#inboundTable tbody');
+  if (!tbody) return;
+  tbody.textContent = '';
+
+  if (steps.length === 0) {
+    const tr = document.createElement('tr');
+    const td = createTextElement('td', '未辨識到入金步驟。');
+    td.colSpan = 6;
+    td.style.textAlign = 'center';
+    td.style.color = '#64748b';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  steps.forEach((s) => {
+    const tr = document.createElement('tr');
+
+    const tdCat = document.createElement('td');
+    const badgeCls = s.line_style === 'solid' ? 'badge-solid' : 'badge-dashed';
+    tdCat.appendChild(createTextElement('span', s.path_category || '未能分類', `badge ${badgeCls}`));
+
+    const tdAmt = createTextElement('td', `${s.amount} ${s.token}`, 'mono');
+    tdAmt.style.fontWeight = '600';
+    tdAmt.style.color = '#38bdf8';
+
+    const tdTime = createTextElement('td', s.timestamp || '—', 'mono');
+
+    const tdFrom = document.createElement('td');
+    tdFrom.appendChild(createAddressLink(s.from_address, s.chain_id || 137, s.label));
+
+    const tdTx = document.createElement('td');
+    tdTx.appendChild(createTxLink(s.tx_hash, s.chain_id || 137));
+
+    const tdEvid = createTextElement('td', s.evidence_source || '鏈上紀錄');
+
+    tr.appendChild(tdCat);
+    tr.appendChild(tdAmt);
+    tr.appendChild(tdTime);
+    tr.appendChild(tdFrom);
+    tr.appendChild(tdTx);
+    tr.appendChild(tdEvid);
+    tbody.appendChild(tr);
+  });
 }
 
 // 渲染 🎯 Polymarket 投注解碼表格
 function renderBettingTable(steps) {
   const tbody = document.querySelector('#bettingTable tbody');
   if (!tbody) return;
-  tbody.innerHTML = '';
+  tbody.textContent = '';
 
   if (steps.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b;">本次未辨識到 Polymarket 下注交易。</td></tr>';
+    const tr = document.createElement('tr');
+    const td = createTextElement('td', '本次未辨識到 Polymarket 下注交易。');
+    td.colSpan = 7;
+    td.style.textAlign = 'center';
+    td.style.color = '#64748b';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
     return;
   }
 
   steps.forEach((s) => {
     const info = s.trade_info || {};
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${s.timestamp || ''}</td>
-      <td style="font-weight: 600; color:#f0f6fc;">${info.market_title || '市場題目待解析'}</td>
-      <td><span class="badge" style="background:#0f2438; color:#38bdf8;">${info.outcome || '選項待解'}</span></td>
-      <td class="mono" style="color:#34d399;">${info.collateral_amount || s.amount} ${info.collateral_token || s.token}</td>
-      <td class="mono">${info.shares || 'N/A'}</td>
-      <td class="mono"><a href="#" onclick="openTxUrl('${s.tx_hash}'); return false;" style="color:#38bdf8;">${s.tx_hash.slice(0, 10)}...</a></td>
-      <td>${info.enrichment_source || s.evidence_source || 'Receipt 解碼'}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
 
-// 渲染 💰 入金路徑表格
-function renderInboundTable(steps) {
-  const tbody = document.querySelector('#inboundTable tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+    const tdTime = createTextElement('td', s.timestamp || '—', 'mono');
+    const tdTitle = createTextElement('td', info.market_title || '市場題目待解析');
+    tdTitle.style.fontWeight = '600';
+    tdTitle.style.color = '#f0f6fc';
 
-  if (steps.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#64748b;">未辨識到入金步驟。</td></tr>';
-    return;
-  }
+    const tdOutcome = document.createElement('td');
+    const outBadge = createTextElement('span', info.outcome || '選項待解', 'badge');
+    outBadge.style.background = '#0f2438';
+    outBadge.style.color = '#38bdf8';
+    tdOutcome.appendChild(outBadge);
 
-  steps.forEach((s) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><span class="badge ${s.line_style === 'solid' ? 'badge-solid' : 'badge-dashed'}">${s.path_category || '未能分類'}</span></td>
-      <td class="mono" style="font-weight:600; color:#38bdf8;">${s.amount} ${s.token}</td>
-      <td class="mono">${s.timestamp || ''}</td>
-      <td class="mono">${s.from_address.slice(0, 12)}... ${s.label ? `<span style="color:#fbbf24;">[${s.label}]</span>` : ''}</td>
-      <td class="mono"><a href="#" onclick="openTxUrl('${s.tx_hash}'); return false;" style="color:#38bdf8;">${s.tx_hash.slice(0, 10)}...</a></td>
-      <td>${s.evidence_source || '鏈上紀錄'}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
+    const tdAmt = createTextElement('td', `${info.collateral_amount || s.amount} ${info.collateral_token || s.token}`, 'mono');
+    tdAmt.style.color = '#34d399';
 
-// 渲染 ⚖️ 函調候選清單
-function renderSubpoenaTable(candidates) {
-  const tbody = document.querySelector('#subpoenaTable tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+    const tdShares = createTextElement('td', info.shares || 'N/A', 'mono');
 
-  if (candidates.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#64748b;">本案尚未命中具直接函調價值之交易所或入金商節點。</td></tr>';
-    return;
-  }
+    const tdTx = document.createElement('td');
+    tdTx.appendChild(createTxLink(s.tx_hash, s.chain_id || 137));
 
-  candidates.forEach((c) => {
-    const tr = document.createElement('tr');
-    const isKyc = c.inquiry_value === '可函調 KYC';
-    const tagCls = isKyc ? 'badge-vasp' : 'badge-dashed';
+    const tdSrc = createTextElement('td', info.enrichment_source || s.evidence_source || 'Receipt 解碼');
 
-    tr.innerHTML = `
-      <td style="font-weight:700; color:#f0f6fc;">${c.service_provider || '未標註實體'}</td>
-      <td>${c.service_type || ''}</td>
-      <td><span class="badge ${tagCls}">${c.inquiry_value || ''}</span></td>
-      <td class="mono">${c.asset} ${c.amount}</td>
-      <td class="mono">${c.datetime_tw || ''}</td>
-      <td class="mono">${c.from_address}</td>
-      <td class="mono"><a href="#" onclick="openTxUrl('${c.tx_hash}'); return false;" style="color:#38bdf8;">${c.tx_hash.slice(0, 10)}...</a></td>
-      <td style="color:#94a3b8; font-size:10px;">${c.limitations || ''}</td>
-    `;
+    tr.appendChild(tdTime);
+    tr.appendChild(tdTitle);
+    tr.appendChild(tdOutcome);
+    tr.appendChild(tdAmt);
+    tr.appendChild(tdShares);
+    tr.appendChild(tdTx);
+    tr.appendChild(tdSrc);
     tbody.appendChild(tr);
   });
 }
@@ -396,32 +742,57 @@ function renderSubpoenaTable(candidates) {
 function renderAuditTable(tracks) {
   const tbody = document.querySelector('#auditTable tbody');
   if (!tbody) return;
-  tbody.innerHTML = '';
+  tbody.textContent = '';
 
   const keys = Object.keys(tracks);
   if (keys.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#64748b;">本次查詢未啟用或未記錄定向代幣軌道。</td></tr>';
+    const tr = document.createElement('tr');
+    const td = createTextElement('td', '本次查詢未記錄定向代幣軌道。');
+    td.colSpan = 6;
+    td.style.textAlign = 'center';
+    td.style.color = '#64748b';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
     return;
   }
 
   keys.forEach((k) => {
     const t = tracks[k];
     const tr = document.createElement('tr');
-    let statusBadge = '<span class="badge" style="background:#064e3b; color:#34d399;">正常完成</span>';
-    if (t.status === 'error') {
-      statusBadge = '<span class="badge" style="background:#7f1d1d; color:#f87171;">查詢失敗</span>';
-    } else if (t.is_truncated) {
-      statusBadge = '<span class="badge badge-vasp">已達上限 (歷史未完整)</span>';
-    }
 
-    tr.innerHTML = `
-      <td style="font-weight:600; color:#f0f6fc;">${t.symbol || 'ERC-20'}</td>
-      <td class="mono">${t.token}</td>
-      <td>${statusBadge}</td>
-      <td>${t.pages_scanned || 0} 頁 / ${t.items_count || 0} 筆</td>
-      <td>${t.min_block ? `區塊 ${t.min_block} ～ ${t.max_block}` : '無資料'}</td>
-      <td style="color:#ef4444;">${t.error_message || '—'}</td>
-    `;
+    const tdSymbol = createTextElement('td', t.symbol || 'ERC-20');
+    tdSymbol.style.fontWeight = '600';
+    tdSymbol.style.color = '#f0f6fc';
+
+    const tdContract = createTextElement('td', t.token || '', 'mono');
+
+    const tdStatus = document.createElement('td');
+    let stBadge;
+    if (t.status === 'error') {
+      stBadge = createTextElement('span', '查詢失敗', 'badge');
+      stBadge.style.background = '#7f1d1d';
+      stBadge.style.color = '#f87171';
+    } else if (t.is_truncated) {
+      stBadge = createTextElement('span', '已達上限 (歷史未完整)', 'badge badge-vasp');
+    } else {
+      stBadge = createTextElement('span', '正常完成', 'badge');
+      stBadge.style.background = '#064e3b';
+      stBadge.style.color = '#34d399';
+    }
+    tdStatus.appendChild(stBadge);
+
+    const tdPages = createTextElement('td', `${t.pages_scanned || 0} 頁 / ${t.items_count || 0} 筆`);
+    const tdBlocks = createTextElement('td', t.min_block ? `區塊 ${t.min_block} ～ ${t.max_block}` : '無資料');
+
+    const tdErr = createTextElement('td', t.error_message || '—');
+    tdErr.style.color = '#ef4444';
+
+    tr.appendChild(tdSymbol);
+    tr.appendChild(tdContract);
+    tr.appendChild(tdStatus);
+    tr.appendChild(tdPages);
+    tr.appendChild(tdBlocks);
+    tr.appendChild(tdErr);
     tbody.appendChild(tr);
   });
 }
@@ -442,10 +813,15 @@ function renderReportText(data) {
     `【注意事項與法證邊界】`,
     ...(data.warnings || []).map((w) => `! ${w}`),
     ``,
-    `【函調候選清單摘要】`,
-    ...(data.subpoena_candidates || []).map((c) =>
-      `[${c.inquiry_value}] 服務商：${c.service_provider} (${c.service_type}) ｜ 金額：${c.amount} ${c.asset} ｜ Tx：${c.tx_hash}`
-    ),
+    `【可函調服務商清單】`,
+    ...(data.subpoena_candidates || [])
+      .filter((c) => c.inquiry_value === '可函調 KYC')
+      .map((c) => `[可函調 KYC] 服務商：${c.service_provider} ｜ 金額：${c.amount} ${c.asset} ｜ Tx：${c.tx_hash}`),
+    ``,
+    `【上游追蹤線索清單】`,
+    ...(data.subpoena_candidates || [])
+      .filter((c) => c.inquiry_value !== '可函調 KYC')
+      .map((c) => `[${c.inquiry_value}] 節點：${c.service_provider} (${c.service_type}) ｜ 地址：${c.from_address} ｜ Tx：${c.tx_hash}`),
   ];
 
   el.textContent = lines.join('\n');

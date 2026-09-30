@@ -1,6 +1,6 @@
 /**
  * Chain Fund Tracer - 可互動 SVG 資金流程圖 (graph.js)
- * 支援縮放、拖曳、實線/虛線/點線語義渲染、過濾器與右側卡片點選連動。
+ * 支援縮放、拖曳、實線/虛線/點線語義渲染、文字錯位防疊、自動視野置中 (fitToView) 與高亮連動。
  */
 
 class FlowGraph {
@@ -14,7 +14,6 @@ class FlowGraph {
     this.viewBox = { x: 0, y: 0, w: 1000, h: 600 };
     this.isPanning = false;
     this.startPoint = { x: 0, y: 0 };
-    this.scale = 1.0;
 
     this.selectedStepIndex = null;
     this.initEvents();
@@ -22,7 +21,7 @@ class FlowGraph {
 
   initEvents() {
     this.svg.addEventListener('mousedown', (e) => {
-      // 點擊空白處平移
+      // 點擊空白處或 root 進行畫布平移
       if (e.target === this.svg || e.target.tagName === 'svg' || e.target.id === 'graphRoot') {
         this.isPanning = true;
         this.startPoint = { x: e.clientX, y: e.clientY };
@@ -64,8 +63,38 @@ class FlowGraph {
     this.svg.setAttribute('viewBox', `${this.viewBox.x} ${this.viewBox.y} ${this.viewBox.w} ${this.viewBox.h}`);
   }
 
-  resetView() {
-    this.viewBox = { x: 0, y: 0, w: 1100, h: 650 };
+  fitToView(nodes) {
+    if (!nodes || nodes.size === 0) {
+      this.viewBox = { x: 0, y: 0, w: 1000, h: 600 };
+      this.updateViewBox();
+      return;
+    }
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    nodes.forEach((node) => {
+      if (node.x < minX) minX = node.x;
+      if (node.x > maxX) maxX = node.x;
+      if (node.y < minY) minY = node.y;
+      if (node.y > maxY) maxY = node.y;
+    });
+
+    const graphW = maxX - minX;
+    const graphH = maxY - minY;
+
+    // 計算合適的縮放，加上外框留白（padding），使圖譜佔畫布約 70%～80%
+    const padX = 160;
+    const padY = 120;
+    const targetW = Math.max(graphW + padX * 2, 800);
+    const targetH = Math.max(graphH + padY * 2, 520);
+
+    this.viewBox.w = targetW;
+    this.viewBox.h = targetH;
+    this.viewBox.x = minX - (targetW - graphW) / 2;
+    this.viewBox.y = minY - (targetH - graphH) / 2;
     this.updateViewBox();
   }
 
@@ -77,8 +106,17 @@ class FlowGraph {
   setData(steps) {
     this.steps = steps || [];
     this.selectedStepIndex = null;
-    this.render();
-    this.resetView();
+    const nodes = this.render();
+    this.fitToView(nodes);
+  }
+
+  selectStepByObject(stepObj) {
+    if (!stepObj) return;
+    const idx = this.steps.findIndex((s) => s.tx_hash === stepObj.tx_hash && s.from_address === stepObj.from_address);
+    if (idx !== -1) {
+      this.selectedStepIndex = idx;
+      this.render();
+    }
   }
 
   isStepVisible(step) {
@@ -99,13 +137,13 @@ class FlowGraph {
       return cat === 'Polymarket 平台內部回款／贖回' || step.path_role === '內部';
     }
     if (this.filter === 'outflow') {
-      return step.direction.includes('出金') || step.path_role === '出金';
+      return (step.direction || '').includes('出金') || step.path_role === '出金';
     }
     return true;
   }
 
   render() {
-    this.svg.innerHTML = '';
+    this.svg.textContent = ''; // 清空畫布
 
     // 建立箭頭標記
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -122,6 +160,9 @@ class FlowGraph {
       <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
         <path d="M 0 1 L 10 5 L 0 9 z" fill="#c084fc"/>
       </marker>
+      <marker id="arrow-selected" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#ffffff"/>
+      </marker>
     `;
     this.svg.appendChild(defs);
 
@@ -131,52 +172,51 @@ class FlowGraph {
 
     if (!this.steps || this.steps.length === 0) {
       const emptyText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      emptyText.setAttribute('x', '550');
+      emptyText.setAttribute('x', '500');
       emptyText.setAttribute('y', '300');
       emptyText.setAttribute('text-anchor', 'middle');
       emptyText.setAttribute('fill', '#64748b');
       emptyText.setAttribute('font-size', '14');
       emptyText.textContent = '尚無分析步驟資料，請由左側輸入地址或雜湊開始查詢。';
       rootG.appendChild(emptyText);
-      return;
+      return new Map();
     }
 
     // 收集所有節點與邊
     const visibleSteps = this.steps.filter((s) => this.isStepVisible(s));
     if (visibleSteps.length === 0) {
       const emptyText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      emptyText.setAttribute('x', '550');
+      emptyText.setAttribute('x', '500');
       emptyText.setAttribute('y', '300');
       emptyText.setAttribute('text-anchor', 'middle');
       emptyText.setAttribute('fill', '#64748b');
       emptyText.setAttribute('font-size', '14');
       emptyText.textContent = '目前篩選條件下無符合之金流步驟。';
       rootG.appendChild(emptyText);
-      return;
+      return new Map();
     }
 
-    // 動態排列層級 (Layered Layout)
-    // 依跳數 hop (0: 目標, 1: 前一步, 2: 來源...)
+    // 節點分組 (Layered Layout)
     const nodes = new Map();
-    visibleSteps.forEach((step, idx) => {
+    visibleSteps.forEach((step) => {
       const fromAddr = (step.from_address || 'unknown_from').toLowerCase();
       const toAddr = (step.to_address || 'unknown_to').toLowerCase();
 
       if (!nodes.has(fromAddr)) {
         nodes.set(fromAddr, {
           id: fromAddr,
-          label: step.label || step.from_address.slice(0, 10) + '...',
+          label: step.label || step.from_address.slice(0, 8) + '...',
           classification: step.classification,
-          hop: step.hop,
+          hop: step.hop || 1,
           category: step.path_category,
         });
       }
       if (!nodes.has(toAddr)) {
         nodes.set(toAddr, {
           id: toAddr,
-          label: toAddr.slice(0, 10) + '...',
+          label: toAddr.slice(0, 8) + '...',
           classification: '目標錢包',
-          hop: Math.max(0, step.hop - 1),
+          hop: Math.max(0, (step.hop || 1) - 1),
           category: '目標',
         });
       }
@@ -191,14 +231,14 @@ class FlowGraph {
     });
 
     const maxHop = Math.max(...Array.from(hopGroups.keys()), 1);
-    const startX = 100;
-    const endX = 950;
+    const startX = 120;
+    const endX = 880;
     const stepX = (endX - startX) / Math.max(maxHop, 1);
 
     hopGroups.forEach((groupNodes, h) => {
-      // 資金流入方向通常是左 (高 hop) -> 右 (目標 hop 0)
+      // 資金流入通常由左 (高 hop 來源) -> 右 (目標 hop 0)
       const x = endX - (h * stepX);
-      const totalY = 500;
+      const totalY = 460;
       const count = groupNodes.length;
       const spacingY = totalY / (count + 1);
 
@@ -250,20 +290,30 @@ class FlowGraph {
       }
 
       const isSelected = this.selectedStepIndex === idx;
-      path.setAttribute('stroke', isSelected ? '#ffffff' : strokeColor);
+      if (isSelected) {
+        strokeColor = '#ffffff';
+        marker = 'arrow-selected';
+      }
+
+      path.setAttribute('stroke', strokeColor);
       path.setAttribute('stroke-width', isSelected ? '3.5' : (step.line_style === 'solid' ? '2.2' : '1.5'));
       path.setAttribute('marker-end', `url(#${marker})`);
 
-      // 箭頭文字 (金額與 Token)
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      // 箭頭文字卡片（金額與 Token，上下錯位防重疊）
       const midX = (u.x + v.x) / 2;
-      const midY = (u.y + v.y) / 2 - 8;
+      // 依 idx 動態錯位：-14, 0, +14
+      const staggerOffset = ((idx % 3) - 1) * 16;
+      const midY = (u.y + v.y) / 2 - 10 + staggerOffset;
+
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('x', midX);
       text.setAttribute('y', midY);
       text.setAttribute('fill', isSelected ? '#ffffff' : strokeColor);
-      text.setAttribute('font-size', '10');
-      text.setAttribute('font-weight', '600');
+      text.setAttribute('font-size', '11');
+      text.setAttribute('font-weight', '700');
       text.setAttribute('text-anchor', 'middle');
+      // 以黑色描邊防文字受線條干擾
+      text.setAttribute('style', 'paint-order: stroke; stroke: #0a0e14; stroke-width: 3.5px; stroke-linejoin: round;');
       text.textContent = `${step.amount || ''} ${step.token || ''}`;
 
       edgeG.appendChild(path);
@@ -319,7 +369,7 @@ class FlowGraph {
       rect.setAttribute('stroke-width', '1.5');
       nodeG.appendChild(rect);
 
-      // 節點文字
+      // 節點標題文字
       const textTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       textTitle.setAttribute('x', '-60');
       textTitle.setAttribute('y', '-4');
@@ -329,6 +379,7 @@ class FlowGraph {
       textTitle.textContent = `${icon} ${node.label.slice(0, 14)}`;
       nodeG.appendChild(textTitle);
 
+      // 節點地址副標
       const textSub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       textSub.setAttribute('x', '-60');
       textSub.setAttribute('y', '12');
@@ -340,17 +391,20 @@ class FlowGraph {
 
       nodeG.addEventListener('click', (e) => {
         e.stopPropagation();
-        // 點選節點時，找到關聯的 step 並觸發
-        const matched = this.steps.find((s) =>
-          (s.from_address || '').toLowerCase() === node.id ||
-          (s.to_address || '').toLowerCase() === node.id
+        const matched = this.steps.find(
+          (s) =>
+            (s.from_address || '').toLowerCase() === node.id ||
+            (s.to_address || '').toLowerCase() === node.id
         );
         if (matched) {
+          this.selectStepByObject(matched);
           this.onSelect(matched);
         }
       });
 
       rootG.appendChild(nodeG);
     });
+
+    return nodes;
   }
 }

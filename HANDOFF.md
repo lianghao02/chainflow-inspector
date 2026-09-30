@@ -1,20 +1,79 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十一輪已打通初衷核心：個人錢包自動向上遞迴（Recursive Upstream Tracing 直到命中交易所）＋初始原生 POL 手續費開戶來源穿透（命中交易所直接納入調證清單）；升級 HTML 視覺化工作台（PyWebView）；112 項測試與語法檢查通過；4 個真實案件地址實機核覈通過。**
+> **第三十二輪已完成 P0 發布前必修修復（requirements.txt 鎖定、app.py 明確啟動提示、HTML/JS 全面杜絕 XSS、金鑰脫敏與白名單 Explorer、EOA 遞迴嚴格幣別金額時間核對防誤認本金、歷史最早 POL Gas 排序）與 P1/P2 介面判讀優化（本案初步結論摘要橫幅、4 軌狀態徽章、流程圖文字防疊錯位、自動置中 fitToView、可函調服務商獨立頁籤、整合匯出選單）；全套 114 項測試 100% 通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
-- **Baseline Commit SHA**：`7a494b7`
-- **Software Version**：`v1.4.0`（PyWebView 現代化法證工作台、個人錢包遞迴向上追溯、初始手續費開戶來源穿透、入金 7 大路徑分類、函調候選清單提煉、核心儲備代幣透明稽核）
+- **Baseline Commit SHA**：`a250b87`
+- **Software Version**：`v1.4.1`（P0 發布前安全加固、EOA 遞迴嚴格法證核對、歷史最早燃料排序、XSS 徹底免疫、PyWebView 現代化法證工作台、初步結論摘要橫幅、可函調服務商獨立頁籤、4 軌狀態徽章、視野自適應圖譜）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
-- **Task Type**：IMPROVE / RELEASE
+- **Task Type**：FIX / IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
 
 ---
+
+## 第三十二輪完成工作：發布前 P0 安全與法證核對必修修復 ＋ 介面判讀優化
+
+### 一、P0 發布前必修問題修復
+
+1. **依賴鎖定與明確啟動提示（`requirements.txt` & `app.py`）**：
+   - 於 `requirements.txt` 正式加入並鎖定 `pywebview>=5.0.0,<6.0.0`。
+   - 修改 `app.py`，若環境未安裝 `pywebview`，印出明確安裝指令指引（`py -3 -m pip install -r requirements.txt`），若具 GUI 環境則彈出對話框告知，絕不靜默降級回舊 Tkinter 介面。
+2. **HTML / JS 全面防禦 XSS 與資安加固（`app.js` & `controller.py`）**：
+   - 全面移除 `app.js` 中所有未跳脫的 `innerHTML` 與 inline `onclick`，改用 DOM API（`textContent`、`createElement`、安全點擊事件監聽器）動態組裝頁面，徹底杜絕鏈上惡意代幣名稱、公開標籤或備註進行腳本注入。
+   - **金鑰脫敏**：`Controller.get_init_data()` 不再將明文 `etherscan_api_key` 傳回前端，改為傳遞 `has_etherscan_api_key: bool` 安全狀態旗標；金鑰僅保存在本機 `settings.json`。
+   - **白名單 Explorer 網址防護**：`open_external()` 引入嚴格白名單與 HTTPS 協議校驗（僅允許 `polygonscan.com`, `etherscan.io`, `bscscan.com`, `arbiscan.io`, `optimistic.etherscan.io`, `basescan.org`, `tronscan.org`, `polymarket.com`），並新增後端專用 `open_explorer(chainId, type, value)` 產生器，杜絕任意惡意跳轉。
+3. **EOA 向上遞迴嚴格法證分級（`analysis.py`）**：
+   - 拒絕把無關的早期入帳推定為本案本金；每一跳嚴格進行：
+     - **幣別核對**：同幣別（如 USDC）。
+     - **金額核對**：入帳金額是否足額涵蓋轉出金額且在合理容差範圍（95%～130%）內。
+     - **時間窗核對**：轉入必須在轉出之前，且在 30 天內緊鄰。
+   - 滿足嚴格條件者，才標註為「逐筆本金候選」（`solid` 實線，`pair_verified=True`，命中交易所標註 `[可函調 KYC]`）。
+   - 金額不符、時間遙遠或多筆混合者，一律降級為「較早資金關聯／上游追蹤線索」（`dashed` 虛線，`pair_verified=False`），命中交易所者明確註記非逐筆本金，在函調清單列為 `[僅供上游追蹤]`，杜絕混入 KYC 主清單。
+4. **初始 POL 燃料開戶來源依區塊高度升序取最早有效入帳**：
+   - 修改 `_inspect_initial_gas_funder()`，將原生代幣轉入依區塊高度與時間升序排序，精確取**歷史最早有效轉入**（`value > 0` 且 `to == norm_eoa`）。
+   - 固定標註為 `[輔助線索]`（`dotted` 點線，`event_role="手續費供資"`），載明非下注本金，僅為開戶出資來源。
+5. **無 GUI 顯示環境測試安全跳過（`test_gui.py`）**：
+   - 在 `tests/test_gui.py` 加入 `has_display()` 偵測，無桌面顯示環境時安全 skip，避免在乾淨無桌面環境下出現 9 項 Tkinter 失敗。
+
+---
+
+### 二、P1 / P2 介面結構與判讀優化
+
+1. **頂部「本案初步結論」摘要橫幅**：
+   - 於工作台頂部建立固定摘要卡片，即時揭露：
+     - 🏛️ 可函調 KYC 服務商（如 `Binance (1)`）
+     - ⚡ 逐筆本金主線（條數）
+     - 🌉 跨鏈／Relay 路徑（段數）
+     - 🔍 僅供上游追查節點（個數）
+     - 📜 資料完整性（4 軌查詢狀態與上限提示）
+   - 承辦人第一眼即可辨識調證實體。
+2. **底欄資料頁籤分層重整（不混淆證據層級）**：
+   - 🏛️ **可函調服務商**：專屬高優先展示，僅收錄具中心化 KYC 價值之 CEX 與法幣入金商。
+   - 🔍 **上游追查節點**：收錄外部個人錢包、Relay、DEX 等供向上追蹤。
+   - 🛣️ **入金路徑**
+   - 🎯 **投注解碼**
+   - 📜 **4 軌查詢狀態與稽核軌道**
+   - 📄 **法證文字報告**
+3. **右欄證據詳情預設選取**：
+   - 查詢完成後自動選取最高優先級之「交易所直提／逐筆本金」步驟展示，不再呈現空白或底層 pUSD 事件。
+4. **流程圖箭頭文字錯位防疊（Anti-Collision）**：
+   - 金額卡片置於中點，遇多條平行邊依 index 進行上下錯位（`-16px, 0, +16px`），並加上背景深色描邊，文字清晰易讀。
+5. **圖譜自適應視野置中（`fitToView`）**：
+   - 動態計算所有節點的外框範圍，載入後自動居中並撐滿畫布 70%～80% 區域，徹底消除上方大片空白。
+6. **畫布圖例列（Legend Bar）**：
+   - 畫布上方常駐展示色彩圖例：🏛️ 交易所（黃）、🌉 跨鏈（紫）、🎯 Polymarket（深藍）、👛 外部錢包（深灰/藍框）、⭐ 目標錢包（綠）。
+7. **4 軌直觀狀態徽章（Badges）**：
+   - 左側面板顯示 USDC、USDC.e、pUSD、USDT 四大幣別之完成/截斷/失敗狀態徽章。
+8. **頂部匯出整合為下拉選單**：
+   - 整合為「📥 匯出法證文件 ▾」，點開選擇 ZIP、CSV、TXT、SVG，釋放頂端導覽列空間。
+
+---
+
 
 ## 第三十一輪完成工作：回歸初衷核心（個人錢包自動遞迴續追至交易所＋初始 Gas 開戶穿透）與 PyWebView HTML 工作台
 

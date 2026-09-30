@@ -5,6 +5,17 @@ from chain_fund_tracer.gui import App
 from chain_fund_tracer.models import AnalysisResult, TraceStep
 
 
+def has_display() -> bool:
+    try:
+        r = tk.Tk()
+        r.withdraw()
+        r.destroy()
+        return True
+    except Exception:
+        return False
+
+
+@unittest.skipIf(not has_display(), "無 GUI 視窗顯示環境，安全略過 Tkinter 介面測試")
 class GuiFlowTests(unittest.TestCase):
     def test_vertical_evidence_chain_shows_time_and_bridge_elapsed(self):
         root = tk.Tk()
