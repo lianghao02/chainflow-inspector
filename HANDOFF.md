@@ -1,16 +1,16 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第二十九輪已完成「4 軌核心儲備代幣定向入金打撈（Targeted Inbound Asset Pipeline）與法證優先級排序」：針對 Native USDC、USDC.e、pUSD、USDT 實施定向入金（filter=to）打撈，徹底免疫高頻交易與垃圾粉塵空投干擾；新增法證優先級排序器 `_prioritize_candidates()`，確保交易所／VASP 本金永不被高頻撮合擠落；實作 CSV 截斷／污染自動容錯補強；目標地址 `0xcCeb22...` 於純線上與遭污染 CSV 模式下均 100% 精準命中幣安熱錢包 48 入金；全套測試增至 104 題 100% 通過。**
+> **第三十輪已完成 Git 發布前審查：修正定向代幣查詢覆寫一般歷史查詢範圍的稽核問題，統一版本與 README，隔離本機設定、案件歷史、報告及 CSV；105 項測試與語法檢查通過。本機 Git 已初始化並提交，GitHub 遠端建立因須由使用者明確確認目的帳號及公開鏈上識別資料上傳範圍而暫停。**
 
 ## 核心元資料
 
-- **Repository**：`chain-fund-tracer`（尚未設定 Git 遠端）
-- **Branch**：不適用（目前不是 Git Repository）
-- **Commit SHA**：不適用／未提交
+- **Repository**：`chain-fund-tracer`（本機 Git；預定私人遠端 `lianghao02/chainflow-inspector`，尚待明確授權）
+- **Branch**：`main`
+- **Baseline Commit SHA**：`8d5de17`（初始可交付版本；交接文件後續提交以 Git HEAD 為準）
 - **Software Version**：`v1.3.0`（4 軌核心儲備代幣定向打撈、候選法證優先級排序、CSV 截斷自動容錯）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
-- **Task Type**：IMPROVE（4 軌核心儲備代幣定向入金打撈與法證優先級排序）
+- **Task Type**：RELEASE（本機發布準備完成；GitHub 同步待明確授權）
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
 
