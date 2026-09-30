@@ -232,7 +232,7 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
             service_provider = "Relay Protocol (Relay.link)" if "relay" in lbl_lower or step.relay_request_id else (lbl or "跨鏈協議")
             service_type = "跨鏈橋／Relay"
             inquiry_value = "可函調跨鏈發起IP與路由紀錄"
-            limitations = "去中心化跨鏈協議；檢附 Relay Request ID 與目的鏈 Tx，可向 Relay 官方調取發起人 IP 與簽名錢包；出資來源經過多鏈跳轉，需搭配來源鏈上游追蹤。"
+            limitations = "⚠️ 去中心化跨鏈協議，非中心化交易所 (VASP)，無自然人 KYC。不可作為實名調證終點！全案實名破口在來源鏈（如 BNB Chain）之出資交易所；檢附 Relay Request ID 與目的鏈 Tx 向 Relay 調取僅供獲取發起人連線 IP 與簽名錢包作為技術佐證。"
 
         elif cat == "DEX 兌換":
             service_provider = lbl or "去中心化交易所 (DEX)"
@@ -924,8 +924,9 @@ class Analyzer:
 
             if relay_found:
                 result.summary.append(
-                    "【法證調證處方】本案本金經由跨鏈橋（Relay Protocol）由其他鏈或幣別轉換撥付；"
-                    "建議檢附 Relay Request ID 與目的鏈交易雜湊，向 Relay 官方調取發起人 IP 與簽名錢包，並持續追蹤來源鏈發起端之上游出資者。"
+                    "【法證調證處方（跨鏈中繼特性警示）】本案資金係經由跨鏈橋（Relay Protocol）由其他鏈（如 BNB Chain）轉換中繼；"
+                    "Relay 官方為去中心化路由協議，非中心化交易所，無自然人開戶 KYC，不可作為實名調證終點！"
+                    "真正之實名破口在來源鏈發起端之上游交易所（例如 Binance 幣安）。向 Relay 官方調取僅能以 Relay Request ID 獲取發起人連線 IP 與簽名錢包作為技術佐證；必須持續穿透來源鏈上游提幣出金點。"
                 )
             else:
                 has_eoa_inbound = any(
