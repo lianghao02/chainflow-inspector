@@ -64,6 +64,59 @@
     </div>
   </div>
 
+  <!-- 涉案賭客行為畫像與雙向調證卡片 (Suspect Profile & Subpoena Strategy Card) -->
+  <div class="suspect-profile-card" id="suspectProfileCard" style="display: none;">
+    <div class="profile-card-top">
+      <div class="profile-badge-row">
+        <span class="profile-badge" id="profBadge">【涉案賭客資金畫像分析中】</span>
+        <span class="rating-badge" id="profRating">🎯 破案機會：評估中</span>
+      </div>
+      <div class="profile-behavior-desc" id="profBehavior">
+        正在分析鏈上流向與交易所出入金特性…
+      </div>
+    </div>
+
+    <div class="profile-leads-grid">
+      <div class="profile-lead-card inbound">
+        <div class="lead-card-header">
+          <span class="lead-card-icon">📥</span>
+          <span class="lead-card-title">入金出資交易所／來源鏈線索</span>
+        </div>
+        <div class="lead-card-body" id="profInbound">—</div>
+      </div>
+      <div class="profile-lead-card outbound">
+        <div class="lead-card-header">
+          <span class="lead-card-icon">📤</span>
+          <span class="lead-card-title">出金變現交易所／目的鏈線索</span>
+        </div>
+        <div class="lead-card-body" id="profOutbound">—</div>
+      </div>
+    </div>
+
+    <div class="profile-strategy-footer">
+      <div class="strategy-row">
+        <span class="strategy-tag target">⚖️ 核心調證對象</span>
+        <span class="strategy-text highlight" id="profTarget">—</span>
+      </div>
+      <div class="strategy-row">
+        <span class="strategy-tag items">📋 建議函調項目</span>
+        <span class="strategy-text" id="profItems">—</span>
+      </div>
+      <div class="strategy-row">
+        <span class="strategy-tag lead">🔍 偵查破口處方</span>
+        <span class="strategy-text" id="profLead">—</span>
+      </div>
+      <div class="strategy-row" id="profHistoryRow" style="display: none;">
+        <span class="strategy-tag history">⏱️ 歷史限制處方</span>
+        <span class="strategy-text warn" id="profHistory">—</span>
+      </div>
+      <div class="strategy-row">
+        <span class="strategy-tag boundary">⚠️ 法律技術邊界</span>
+        <span class="strategy-text muted" id="profLimits">—</span>
+      </div>
+    </div>
+  </div>
+
   <!-- 主三欄工作台 -->
   <div class="main-container">
 

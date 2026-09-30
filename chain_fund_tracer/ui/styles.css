@@ -637,6 +637,164 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ==========================================================================
+   涉案賭客行為畫像與雙向調證卡片 (Suspect Profile & Subpoena Strategy Card)
+   ========================================================================== */
+.suspect-profile-card {
+  background: linear-gradient(180deg, #0b1120 0%, #151f32 100%);
+  border-bottom: 1px solid #334155;
+  padding: 10px 16px;
+  font-size: 12px;
+  z-index: 6;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.25);
+}
+
+.profile-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+.profile-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-badge {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.rating-badge {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.rating-badge.rating-high {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.rating-badge.rating-warn {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.profile-behavior-desc {
+  color: #94a3b8;
+  font-size: 11.5px;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 280px;
+  text-align: right;
+}
+
+.profile-leads-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.profile-lead-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.profile-lead-card.inbound {
+  border-left: 3px solid #38bdf8;
+}
+
+.profile-lead-card.outbound {
+  border-left: 3px solid #f59e0b;
+}
+
+.lead-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  margin-bottom: 4px;
+}
+
+.lead-card-body {
+  font-size: 11.5px;
+  color: #f1f5f9;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.profile-strategy-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 4px;
+  padding: 6px 10px;
+  border: 1px dashed #334155;
+}
+
+.strategy-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.strategy-tag {
+  font-weight: 700;
+  white-space: nowrap;
+  min-width: 95px;
+}
+
+.strategy-tag.target { color: #38bdf8; }
+.strategy-tag.items { color: #a78bfa; }
+.strategy-tag.lead { color: #34d399; }
+.strategy-tag.history { color: #fbbf24; }
+.strategy-tag.boundary { color: #94a3b8; }
+
+.strategy-text {
+  color: #cbd5e1;
+  flex: 1;
+}
+
+.strategy-text.highlight {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.strategy-text.warn {
+  color: #fcd34d;
+}
+
+.strategy-text.muted {
+  color: #64748b;
+}
+
+/* ==========================================================================
    流程圖畫布上方圖例列 (Legend Bar)
    ========================================================================== */
 .legend-bar {

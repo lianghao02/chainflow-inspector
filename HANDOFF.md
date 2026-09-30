@@ -1,18 +1,70 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十五輪已完成跨鏈調證指引貫穿、非託管錢包調取限制風險揭示、Blockscout 逾時自動降級防禦與圖譜大開闊排版：明確指引下一步調證對象（Binance、Relay Protocol 等）；若為純非託管錢包互轉，誠實揭示無中心化 KYC 之法律真相並指引追查開戶 Gas；圖譜橫向間距擴大為 290px、高度動態自適應，徹底杜絕擁擠重疊。全案 130 項測試全數通過。**
+> **第三十六輪已完成涉案賭客 4+1 大資金行為畫像自動判定、出金變現交易所雙向調證與乾淨總結卡片：自動判定新手直充型、官網跨鏈型、獲利出金退場型、幣圈囤幣（非託管）型與平台內部結算型；雙向打通入金出資與出金變現交易所調證（函調 UID、登入 IP、KYC 與提領法幣帳戶）；工作台頂部新增精緻直觀、零雜亂的涉案賭客行為畫像與調證總結卡片，並提供歷史資料受限時的 CSV 秒載解決處方。全案 132 項測試 100% 通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
-- **Baseline Commit SHA**：`432ca57`
-- **Software Version**：`v1.4.4`（跨鏈調證指引貫穿、非託管錢包調取限制標註、Blockscout 逾時降級、圖譜動態開闊佈局、Polymarket 造市回饋金過濾）
+- **Baseline Commit SHA**：`6a9bb5a`
+- **Software Version**：`v1.5.0`（涉案賭客 4+1 大資金行為畫像自動判定、出金變現交易所雙向調證、乾淨總結卡片、歷史受限處方）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
 - **Task Type**：FIX / IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
+
+---
+
+## 第三十六輪完成工作：涉案賭客 4+1 大資金行為畫像自動判定、出金變現交易所雙向調證與乾淨總結卡片
+
+### 一、涉案賭客 4+1 大資金行為畫像自動判定（`analysis.py`）
+實作 `determine_suspect_profile(result: AnalysisResult)` 演算法，依據鏈上真實軌跡與角色特性自動判定：
+1. **【畫像 1：新手直充型】**：
+   - 特徵：賭客直接由中心化交易所（如 MAX、BitoPro、Binance）提幣或刷卡入金商直充至下注地址。
+   - 破案機會：**極高（交易所直連，100% 破案率）**。
+   - 調證處方：持該筆提幣 Tx Hash 與受款地址，直接發函向交易所調取開戶 UID、登入 IP、身分證 KYC 證件及綁定之法幣銀行帳戶。
+2. **【畫像 2：官網跨鏈型】**：
+   - 特徵：賭客在其他鏈（如 BNB Chain、Ethereum）持有穩定幣，透過 Polymarket 官網內建之 Relay Protocol 跨鏈轉換為 Polygon pUSD 下注；純屬使用官網便捷功能，非刻意洗錢。
+   - 破案機會：**中高（穿透至來源鏈出資點）**。
+   - 關鍵防呆：⚠️ **嚴禁把 Relay 官方當作調證終點！** Relay 是去中心化中繼協議，無自然人 KYC。真正實名破口在來源鏈出資端交易所（檢附來源鏈 Tx 向該交易所發函調證）。向 Relay 官方僅供以 Request ID 調取發起連線 IP 作為技術佐證。
+3. **【畫像 3：獲利出金退場型】**：
+   - 特徵：賭客在 Polymarket 結算或獲利後，銷毀／贖回 pUSD 並透過 Relay 跨鏈提領至其他鏈（如 BNB Chain），最終充值進中心化交易所變現。
+   - 破案機會：**高（出金變現可調證）**。
+   - 調證處方：鎖定出金目的鏈交易所充值交易雜湊，發函向交易所調取充值受款人實名身分，順藤摸瓜查獲賭客提領法幣帳戶。
+4. **【畫像 4：幣圈囤幣（非託管私鑰）型】**：
+   - 特徵：賭客常年持有加密貨幣，資產置於 MetaMask、Ledger 等非託管私鑰錢包，下注時由個人錢包直接轉入或經由場外 OTC 互轉，無中心化交易所直接中介。
+   - 破案機會：**需延伸（純私鑰互轉，依賴開戶 Gas 或實體載具）**。
+   - 偵查處方：⚠️ 純鏈上個人互轉無中心化開戶資料，無法直接向區塊鏈網路函調自然人身分；法證破口在於鎖定轉出人錢包之開戶手續費（Gas）來源交易所，或需搭配場外通訊電信與現場搜索扣案設備。
+5. **【畫像 5：平台內部合約／造市結算型】**：
+   - 特徵：資金主要來自零地址鑄造（Minting）、做市回饋金（Maker Rebates）撥付或合約結算，非外部新入金。
+   - 破案價值：無（平台內部結算，不建議發文函調）。
+
+### 二、出金變現交易所調證候選雙向打通（`analysis.py` & `outflow.py`）
+1. **出金交易所候選生成**（`build_subpoena_candidates`）：
+   - 當步驟為出金（`path_role == "出金"`）且轉入中心化交易所時，自動生成 `inquiry_value = "交易所充值帳戶函調候選"`，`service_type = "中心化交易所 (充值入帳)"`，`association_level = "出金變現"`。
+   - 明確指引「賭客出金／變現充值地址；可向該交易所函調該筆充值入帳之帳號 UID、登入 IP、實名認證（KYC）及綁定提領之法幣銀行帳戶。」
+2. **多鏈跨鏈瀏覽器直連**（`app.js`）：
+   - 調證表格自動依所屬鏈別（如 BNB Chain）產生對應區塊鏈瀏覽器超連結（BNBScan / BscScan），精確跳轉目的鏈交易與地址。
+
+### 三、Web UI 涉案賭客行為畫像與雙向調證卡片（`index.html` & `styles.css` & `app.js`）
+1. **頂部直觀總結卡片（Suspect Profile Card）**：
+   - 位於工作台頂部，排版乾淨俐落、資訊階層分明、去雜亂感。
+   - 頂部標註畫像徽章與破案機會燈號（極高、高、中、需延伸）。
+   - 雙向直觀網格：
+     - 📥 **入金出資交易所／來源鏈線索**
+     - 📤 **出金變現交易所／目的鏈線索**
+   - 下方直觀列出：⚖️ 核心調證對象、📋 建議函調項目、🔍 偵查破口處方、⚠️ 法律與技術邊界。
+2. **歷史受限 CSV 處方引導**：
+   - 若偵測到歷史資料截斷或達 API 單次上限，卡片與報告自動顯示「⏱️ 歷史限制處方：請使用左欄『匯入 PolygonScan 歷史 CSV 索引』（支援 5,000+ 筆完整記錄秒載），或設定『歷史時間錨定』聚焦案發區間。」
+
+### 四、法證純文字報告與模型序列化升級（`models.py` & `app.js` & `exporters.py`）
+1. `AnalysisResult` 新增 `suspect_profile` 結構化欄位，支援完備的 `to_dict` 與 `from_dict` 序列化。
+2. 純文字報告（`renderReportText` 與 `export_text`）頂端同步輸出結構化涉案賭客行為畫像，文字整齊專業。
+
+### 五、驗證
+- 全案 132 項測試 100% 通過（`132 passed in 90.69s`）。
+- 新增 `test_outbound_exchange_cashout_subpoena_candidate` 與 `test_determine_suspect_profiles`。
 
 ---
 

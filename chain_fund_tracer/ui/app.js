@@ -325,7 +325,7 @@ function renderAllResults(data) {
   });
 
   // 2. 調證候選分流：交易所／服務商函調候選 vs 上游追查節點
-  const actionableValues = new Set(['交易所提幣帳戶函調候選', '可函調 KYC', '可函調跨鏈發起IP與路由紀錄']);
+  const actionableValues = new Set(['交易所提幣帳戶函調候選', '交易所充值帳戶函調候選', '可函調 KYC', '可函調跨鏈發起IP與路由紀錄']);
   const kycCandidates = subpoenas.filter((c) => actionableValues.has(c.inquiry_value));
   const upstreamCandidates = subpoenas.filter((c) => !actionableValues.has(c.inquiry_value));
 
@@ -339,8 +339,9 @@ function renderAllResults(data) {
   document.getElementById('countBetting').textContent = bettingSteps.length;
   document.getElementById('countAudit').textContent = Object.keys(tracks).length;
 
-  // 4. 渲染頂部「本案初步結論」摘要橫幅
+  // 4. 渲染頂部「本案初步結論」摘要橫幅與賭客畫像卡片
   renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps);
+  renderSuspectProfileCard(data);
 
   // 5. 渲染 4 軌狀態徽章
   renderTrackBadges(tracks);
@@ -355,6 +356,57 @@ function renderAllResults(data) {
 
   // 7. 預設選取最高優先級之步驟（首選交易所直提/逐筆本金，非內部底層事件）
   selectDefaultPriorityStep(steps);
+}
+
+function renderSuspectProfileCard(data) {
+  const card = document.getElementById('suspectProfileCard');
+  if (!card) return;
+
+  const profile = data.suspect_profile || {};
+  if (!profile.portrait_title && (!data.steps || data.steps.length === 0)) {
+    card.style.display = 'none';
+    return;
+  }
+
+  const badgeEl = document.getElementById('profBadge');
+  const ratingEl = document.getElementById('profRating');
+  const descEl = document.getElementById('profBehavior');
+  const inEl = document.getElementById('profInbound');
+  const outEl = document.getElementById('profOutbound');
+  const targetEl = document.getElementById('profTarget');
+  const itemsEl = document.getElementById('profItems');
+  const leadEl = document.getElementById('profLead');
+  const limitsEl = document.getElementById('profLimits');
+  const histRow = document.getElementById('profHistoryRow');
+  const histEl = document.getElementById('profHistory');
+
+  badgeEl.textContent = profile.portrait_title || '【涉案賭客資金畫像】';
+
+  const rating = profile.breakthrough_rating || '評估中';
+  ratingEl.textContent = `🎯 破案機會：${rating}`;
+  ratingEl.className = 'rating-badge';
+  if (rating.includes('極高') || rating.includes('高')) {
+    ratingEl.classList.add('rating-high');
+  } else if (rating.includes('中') || rating.includes('需延伸')) {
+    ratingEl.classList.add('rating-warn');
+  }
+
+  descEl.textContent = profile.behavior_summary || '無特殊行為說明。';
+  inEl.textContent = profile.inbound_exchange || '未辨識明確入金。';
+  outEl.textContent = profile.outbound_exchange || '未辨識明確出金。';
+  targetEl.textContent = profile.subpoena_target || '—';
+  itemsEl.textContent = profile.subpoena_items || '—';
+  leadEl.textContent = profile.investigation_lead || '—';
+  limitsEl.textContent = profile.limitations || '無特別限制。';
+
+  if (profile.history_solution) {
+    histEl.textContent = profile.history_solution;
+    histRow.style.display = 'flex';
+  } else {
+    histRow.style.display = 'none';
+  }
+
+  card.style.display = 'block';
 }
 
 function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
@@ -597,13 +649,15 @@ function renderKycTable(candidates) {
     tdAmt.style.color = '#38bdf8';
     tdAmt.style.fontWeight = '600';
 
-    const tdTime = createTextElement('td', c.datetime_tw || '未收錄', 'mono');
+    const isCashout = (c.service_type && c.service_type.includes('充值')) || c.association_level === '出金變現';
+    const targetAddr = isCashout ? (c.to_address || c.from_address) : c.from_address;
+    const chainId = c.chain === 'BNB Chain' ? 56 : (c.chain === 'Ethereum' ? 1 : 137);
 
     const tdAddr = document.createElement('td');
-    tdAddr.appendChild(createAddressLink(c.from_address, 137));
+    tdAddr.appendChild(createAddressLink(targetAddr, chainId));
 
     const tdTx = document.createElement('td');
-    tdTx.appendChild(createTxLink(c.tx_hash, 137));
+    tdTx.appendChild(createTxLink(c.tx_hash, chainId));
 
     const tdNotes = createTextElement('td', c.limitations || '—');
     tdNotes.style.color = '#94a3b8';
@@ -873,22 +927,44 @@ function renderReportText(data) {
     `分析狀態：${data.analysis_status === 'partial' ? '部分完成' : data.analysis_status === 'failed' ? '失敗' : '完整'}`,
     `未完成核心資產軌道：${(data.incomplete_tracks || []).join('、') || '無'}`,
     `--------------------------------------------------`,
+  ];
+
+  if (data.suspect_profile && data.suspect_profile.portrait_title) {
+    const p = data.suspect_profile;
+    lines.push(
+      `【涉案賭客行為畫像】${p.portrait_title} ｜ 破案機會：${p.breakthrough_rating}`,
+      `• 行為特徵：${p.behavior_summary}`,
+      `• 📥 入金出資線索：${p.inbound_exchange}`,
+      `• 📤 出金變現線索：${p.outbound_exchange}`,
+      `• ⚖️ 核心調證對象：${p.subpoena_target} ｜ 建議調取：${p.subpoena_items}`,
+      `• 🔍 偵查破口處方：${p.investigation_lead}`,
+      `• ⚠️ 法律與技術邊界：${p.limitations}`,
+    );
+    if (p.history_solution) {
+      lines.push(`• ⏱️ 歷史限制處方：${p.history_solution}`);
+    }
+    lines.push(
+      `--------------------------------------------------`,
+    );
+  }
+
+  lines.push(
     `【摘要結論】`,
-    ...(data.summary || []).map((s) => `• ${s}`),
+    ...(data.summary || []).filter((s) => !s.startsWith('【涉案賭客資金畫像】') && !s.startsWith('• ')).map((s) => `• ${s}`),
     ``,
     `【注意事項與法證邊界】`,
     ...(data.warnings || []).map((w) => `! ${w}`),
     ``,
     `【交易所／服務商函調候選清單】`,
     ...(data.subpoena_candidates || [])
-      .filter((c) => ['交易所提幣帳戶函調候選', '可函調 KYC'].includes(c.inquiry_value))
-      .map((c) => `[${c.inquiry_value}] 服務商：${c.service_provider} ｜ 金額：${c.amount} ${c.asset} ｜ Tx：${c.tx_hash}`),
+      .filter((c) => ['交易所提幣帳戶函調候選', '交易所充值帳戶函調候選', '可函調 KYC'].includes(c.inquiry_value))
+      .map((c) => `[${c.inquiry_value}] 服務商：${c.service_provider} (${c.association_level || '調證候選'}) ｜ 金額：${c.amount} ${c.asset} ｜ Tx：${c.tx_hash}`),
     ``,
     `【上游追蹤線索清單】`,
     ...(data.subpoena_candidates || [])
-      .filter((c) => !['交易所提幣帳戶函調候選', '可函調 KYC'].includes(c.inquiry_value))
+      .filter((c) => !['交易所提幣帳戶函調候選', '交易所充值帳戶函調候選', '可函調 KYC'].includes(c.inquiry_value))
       .map((c) => `[${c.inquiry_value}] 節點：${c.service_provider} (${c.service_type}) ｜ 地址：${c.from_address} ｜ Tx：${c.tx_hash}`),
-  ];
+  );
 
   el.textContent = lines.join('\n');
 }

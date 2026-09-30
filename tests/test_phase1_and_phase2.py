@@ -316,6 +316,111 @@ class TestPhase1AndPhase2(unittest.TestCase):
         self.assertEqual(cands[0].inquiry_value, "僅供上游追蹤")
         self.assertEqual(cands[0].association_level, "輔助線索")
 
+    def test_outbound_exchange_cashout_subpoena_candidate(self):
+        s_outflow = TraceStep(
+            direction="出金目的鏈後續轉出候選",
+            hop=3,
+            tx_hash="0x" + "c" * 64,
+            timestamp="2024-05-15 15:30:00 +0800",
+            token="USDC",
+            amount="64.5",
+            from_address="0x" + "1" * 40,
+            to_address="0x" + "2" * 40,
+            address="0x" + "2" * 40,
+            classification="交易所",
+            label="Binance Hot Wallet 20",
+            label_source="BscScan 公開標籤",
+            confidence="高度可能",
+            relation="僅資金關聯",
+            notes="出金轉至幣安充值",
+            chain="BNB Chain",
+            chain_id=56,
+            path_role="出金",
+        )
+        res = AnalysisResult(query="0x" + "1" * 40, steps=[s_outflow])
+        cands = build_subpoena_candidates(res)
+        self.assertEqual(len(cands), 1)
+        cand = cands[0]
+        self.assertEqual(cand.service_provider, "Binance")
+        self.assertEqual(cand.service_type, "中心化交易所 (充值入帳)")
+        self.assertEqual(cand.inquiry_value, "交易所充值帳戶函調候選")
+        self.assertEqual(cand.association_level, "出金變現")
+        self.assertIn("出金／變現充值地址", cand.limitations)
+
+    def test_determine_suspect_profiles(self):
+        from chain_fund_tracer.analysis import determine_suspect_profile
+
+        # 1. 新手直充型
+        s_novice = TraceStep(
+            direction="地址入金", hop=1, tx_hash="0x" + "1" * 64, timestamp="2024-05-15",
+            token="USDC", amount="1000", from_address="0x" + "a" * 40, to_address="0x" + "b" * 40,
+            address="0x" + "a" * 40, classification="交易所", label="MAX Exchange",
+            label_source="公開標籤", confidence="已確認", relation="直接交易",
+            path_role="入金", line_style="solid", pair_verified=True, event_role="補款",
+        )
+        res1 = AnalysisResult(query="0x" + "b" * 40, steps=[s_novice])
+        prof1 = determine_suspect_profile(res1)
+        self.assertEqual(prof1["portrait_id"], "novice_direct")
+        self.assertIn("新手直充型", prof1["portrait_title"])
+        self.assertIn("極高", prof1["breakthrough_rating"])
+        self.assertIn("MAX Exchange", prof1["inbound_exchange"])
+
+        # 2. 官網跨鏈型
+        s_relay_src = TraceStep(
+            direction="Relay 來源鏈", hop=2, tx_hash="0x" + "2" * 64, timestamp="2024-05-15",
+            token="USDC", amount="500", from_address="0x" + "c" * 40, to_address="0x" + "d" * 40,
+            address="0x" + "c" * 40, classification="外部錢包", label="出資錢包",
+            label_source="Relay", confidence="已確認", relation="跨鏈投入",
+            path_role="入金", chain="BNB Chain", chain_id=56, relay_request_id="req-1",
+            relay_leg="source", pair_verified=True,
+        )
+        res2 = AnalysisResult(query="0x" + "e" * 40, steps=[s_relay_src])
+        prof2 = determine_suspect_profile(res2)
+        self.assertEqual(prof2["portrait_id"], "cross_chain")
+        self.assertIn("官網跨鏈型", prof2["portrait_title"])
+        self.assertIn("BNB Chain", prof2["inbound_exchange"])
+        self.assertIn("Relay 官方當作調證終點", prof2["limitations"])
+
+        # 3. 獲利出金退場型
+        s_cashout = TraceStep(
+            direction="出金目的鏈後續轉出候選", hop=3, tx_hash="0x" + "3" * 64, timestamp="2024-05-15",
+            token="USDC", amount="200", from_address="0x" + "e" * 40, to_address="0x" + "f" * 40,
+            address="0x" + "f" * 40, classification="交易所", label="Binance Hot Wallet",
+            label_source="BscScan 公開標籤", confidence="已確認", relation="僅資金關聯",
+            path_role="出金", chain="BNB Chain", chain_id=56,
+        )
+        res3 = AnalysisResult(query="0x" + "e" * 40, steps=[s_cashout])
+        prof3 = determine_suspect_profile(res3)
+        self.assertEqual(prof3["portrait_id"], "profit_cashout")
+        self.assertIn("獲利出金退場型", prof3["portrait_title"])
+        self.assertIn("Binance", prof3["outbound_exchange"])
+
+        # 4. 幣圈囤幣（非託管私鑰）型
+        s_eoa = TraceStep(
+            direction="地址入金", hop=1, tx_hash="0x" + "4" * 64, timestamp="2024-05-15",
+            token="USDC", amount="300", from_address="0x" + "7" * 40, to_address="0x" + "8" * 40,
+            address="0x" + "7" * 40, classification="外部錢包", label="個人錢包",
+            label_source="無公開標籤", confidence="未知", relation="僅資金關聯",
+            path_role="入金", path_category="外部錢包轉入",
+        )
+        res4 = AnalysisResult(query="0x" + "8" * 40, steps=[s_eoa])
+        prof4 = determine_suspect_profile(res4)
+        self.assertEqual(prof4["portrait_id"], "eoa_hodler")
+        self.assertIn("幣圈囤幣", prof4["portrait_title"])
+
+        # 5. 平台內部合約型
+        s_internal = TraceStep(
+            direction="地址入金", hop=1, tx_hash="0x" + "5" * 64, timestamp="2024-05-15",
+            token="pUSD", amount="19.84", from_address="0x0000000000000000000000000000000000000000",
+            to_address="0x" + "9" * 40, address="0x" + "9" * 40, classification="代幣鑄造 (Mint)",
+            label="零地址", label_source="合約", confidence="已確認", relation="內部事件",
+            path_role="內部", event_role="代幣鑄造", path_category="Polymarket 平台內部回款／贖回",
+        )
+        res5 = AnalysisResult(query="0x" + "9" * 40, steps=[s_internal])
+        prof5 = determine_suspect_profile(res5)
+        self.assertEqual(prof5["portrait_id"], "internal_contract")
+        self.assertIn("平台內部合約", prof5["portrait_title"])
+
 
 if __name__ == "__main__":
     unittest.main()

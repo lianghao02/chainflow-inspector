@@ -198,7 +198,20 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
         inquiry_value = "僅供上游追蹤"
         limitations = ""
 
-        if cat == "交易所直提":
+        is_outflow = step.path_role == "出金"
+        if is_outflow and (cat == "交易所直提" or cls_name in ("交易所", "VASP")):
+            for ex in ("Binance", "OKX", "Bitget", "Bybit", "Coinbase", "Kraken", "MEXC", "Gate.io", "MAX Exchange", "BitoPro"):
+                if ex.lower() in lbl_lower:
+                    service_provider = ex
+                    break
+            if not service_provider:
+                service_provider = lbl or "未具名交易所"
+            service_type = "中心化交易所 (充值入帳)"
+            inquiry_value = "交易所充值帳戶函調候選"
+            limitations = "賭客出金／變現充值地址；可向該交易所函調該筆充值入帳之帳號 UID、登入 IP、實名認證（KYC）及綁定提領之法幣銀行帳戶。"
+            association_level = "出金變現"
+
+        elif cat == "交易所直提":
             for ex in ("Binance", "OKX", "Bitget", "Bybit", "Coinbase", "Kraken", "MEXC", "Gate.io", "MAX Exchange", "BitoPro"):
                 if ex.lower() in lbl_lower:
                     service_provider = ex
@@ -232,7 +245,10 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
             service_provider = "Relay Protocol (Relay.link)" if "relay" in lbl_lower or step.relay_request_id else (lbl or "跨鏈協議")
             service_type = "跨鏈橋／Relay"
             inquiry_value = "可函調跨鏈發起IP與路由紀錄"
-            limitations = "⚠️ 去中心化跨鏈協議，非中心化交易所 (VASP)，無自然人 KYC。不可作為實名調證終點！全案實名破口在來源鏈（如 BNB Chain）之出資交易所；檢附 Relay Request ID 與目的鏈 Tx 向 Relay 調取僅供獲取發起人連線 IP 與簽名錢包作為技術佐證。"
+            if is_outflow:
+                limitations = "⚠️ 去中心化跨鏈協議，非中心化交易所 (VASP)，無自然人 KYC。不可作為實名調證終點！全案實名破口在出金目的鏈（如 BNB Chain）之充值交易所；檢附 Relay Request ID 與目的鏈 Tx 向 Relay 調取僅供獲取發起人連線 IP 與簽名錢包作為技術佐證。"
+            else:
+                limitations = "⚠️ 去中心化跨鏈協議，非中心化交易所 (VASP)，無自然人 KYC。不可作為實名調證終點！全案實名破口在來源鏈（如 BNB Chain）之出資交易所；檢附 Relay Request ID 與目的鏈 Tx 向 Relay 調取僅供獲取發起人連線 IP 與簽名錢包作為技術佐證。"
 
         elif cat == "DEX 兌換":
             service_provider = lbl or "去中心化交易所 (DEX)"
@@ -249,12 +265,17 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
         else:
             continue
 
-        association_level = "逐筆本金" if (
+        if is_outflow:
+            association_level = "出金變現"
+        elif (
             step.line_style == "solid"
             and step.pair_verified
             and step.event_role in ("補款", "底層資產投入", "轉帳", "跨鏈橋入金")
-        ) else "資金池關聯"
-        if step.line_style in ("dashed", "dotted") or step.event_role == "手續費供資":
+        ):
+            association_level = "逐筆本金"
+        else:
+            association_level = "資金池關聯"
+        if not is_outflow and (step.line_style in ("dashed", "dotted") or step.event_role == "手續費供資"):
             association_level = "輔助線索"
 
         candidate = SubpoenaCandidate(
@@ -277,6 +298,7 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
 
     order = {
         "交易所提幣帳戶函調候選": 0,
+        "交易所充值帳戶函調候選": 0,
         "可函調 KYC": 0,
         "可函調跨鏈發起IP與路由紀錄": 1,
         "僅供上游追蹤": 2,
@@ -285,6 +307,193 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
     }
     candidates.sort(key=lambda c: (order.get(c.inquiry_value, 5), -event_timestamp(c.datetime_tw)))
     return candidates
+
+
+def determine_suspect_profile(result: AnalysisResult) -> dict[str, Any]:
+    """判定涉案賭客的 4+1 大資金行為畫像，並萃取雙向（入金出資與出金變現）之交易所調證破口。
+    5 大畫像：
+    1. 【畫像 1：新手直充型】（交易所或法幣入金商直接提幣）
+    2. 【畫像 2：官網跨鏈型】（透過官網 Relay 跨鏈中繼，破口在來源鏈如 BNB Chain）
+    3. 【畫像 3：獲利出金退場型】（結算後銷毀/贖回，透過 Relay 出金至其他鏈充值進交易所變現）
+    4. 【畫像 4：幣圈囤幣（非託管私鑰）型】（MetaMask/EOA 個人互轉，無中心化交易所直接中介，追查開戶 Gas）
+    5. 【畫像 5：平台內部合約／造市結算型】（零地址鑄造、做市回饋金 Rebates 撥付，非外部新資金）
+    """
+    from .flow_graph import is_vasp
+
+    outbound_steps = [s for s in result.steps if s.path_role == "出金"]
+    outbound_vasp = [
+        s for s in outbound_steps
+        if (s.classification in ("交易所", "VASP") or is_vasp(s))
+    ]
+    relay_outflows = [
+        s for s in outbound_steps
+        if "relay" in (s.label or "").lower() or s.relay_request_id or s.direction == "Relay 出金" or "跨鏈" in s.direction
+    ]
+    redemption_steps = [
+        s for s in outbound_steps
+        if s.direction == "pUSD 贖回" or s.event_role == "贖回"
+    ]
+
+    inbound_steps = [s for s in result.steps if s.path_role == "入金"]
+    direct_vasp = [
+        s for s in inbound_steps
+        if s.line_style == "solid" and s.pair_verified
+        and s.classification in {"交易所", "入金服務商", "VASP"}
+        and s.event_role != "手續費供資"
+    ]
+    gas_vasp = [
+        s for s in inbound_steps
+        if s.event_role == "手續費供資" and s.classification in {"交易所", "VASP"}
+    ]
+    relay_inbound = [
+        s for s in inbound_steps
+        if s.relay_request_id or "relay" in (s.label or "").lower() or "Relay" in s.direction
+    ]
+    relay_source_chain_vasp = [
+        s for s in inbound_steps
+        if s.chain_id != 137 and (s.classification in {"交易所", "入金服務商", "VASP"} or is_vasp(s))
+    ]
+    eoa_inbounds = [
+        s for s in inbound_steps
+        if (s.path_category == "外部錢包轉入" or s.classification in ("外部錢包", "非託管個人錢包", "未知地址"))
+        and s.event_role != "代幣鑄造"
+    ]
+    internal_inbounds = [
+        s for s in result.steps
+        if s.path_category == "Polymarket 平台內部回款／贖回" or s.event_role == "代幣鑄造"
+    ]
+
+    # 1. 入金出資線索摘要
+    if direct_vasp:
+        ex_names = "、".join(dict.fromkeys(s.label for s in direct_vasp if s.label))
+        inbound_lead = (
+            f"中心化交易所直提（{ex_names}）；"
+            f"提幣 {direct_vasp[0].amount} {direct_vasp[0].token}；Tx：{direct_vasp[0].tx_hash}"
+        )
+    elif relay_source_chain_vasp:
+        ex_names = "、".join(dict.fromkeys(s.label for s in relay_source_chain_vasp if s.label))
+        inbound_lead = (
+            f"來源鏈（{relay_source_chain_vasp[0].chain}）上游命中交易所（{ex_names}）；"
+            f"出資 {relay_source_chain_vasp[0].amount} {relay_source_chain_vasp[0].token}；Tx：{relay_source_chain_vasp[0].tx_hash}"
+        )
+    elif relay_inbound:
+        src_steps = [s for s in relay_inbound if s.relay_leg == "source" or s.direction == "Relay 來源鏈"]
+        if src_steps:
+            inbound_lead = (
+                f"官網跨鏈中繼（來源鏈：{src_steps[0].chain}，出資地址：{src_steps[0].from_address}）；"
+                f"出資 {src_steps[0].amount} {src_steps[0].token}；來源 Tx：{src_steps[0].tx_hash}"
+            )
+        else:
+            inbound_lead = "經由 Relay Protocol 跨鏈中繼撥付至下注地址"
+    elif gas_vasp:
+        ex_names = "、".join(dict.fromkeys(s.label for s in gas_vasp if s.label))
+        inbound_lead = (
+            f"非託管個人錢包互轉；出資人開戶手續費（Gas）命中交易所（{ex_names}）；"
+            f"手續費 {gas_vasp[0].amount} {gas_vasp[0].token}；Tx：{gas_vasp[0].tx_hash}"
+        )
+    elif eoa_inbounds:
+        inbound_lead = (
+            f"鏈上非託管個人錢包互轉／場外金流（前手地址：{eoa_inbounds[0].from_address}）；"
+            f"金額：{eoa_inbounds[0].amount} {eoa_inbounds[0].token}"
+        )
+    elif internal_inbounds:
+        inbound_lead = "主要為平台合約內部做市回饋金（Rebates）撥付或代幣鑄造（Minting），無外部新入金"
+    else:
+        inbound_lead = "本次公開索引範圍內未找到直接入金紀錄（可能超出歷史分頁上限，建議匯入完整 CSV）"
+
+    # 2. 出金變現線索摘要
+    if outbound_vasp:
+        ex_names = "、".join(dict.fromkeys(s.label for s in outbound_vasp if s.label))
+        outbound_lead = (
+            f"出金目的端命中交易所充值入帳（{ex_names}，鏈別：{outbound_vasp[0].chain}）；"
+            f"充值金額：{outbound_vasp[0].amount} {outbound_vasp[0].token}；Tx：{outbound_vasp[0].tx_hash}"
+        )
+    elif relay_outflows:
+        dest_steps = [s for s in outbound_steps if s.direction == "Relay 出金目的鏈入帳" or s.relay_leg == "destination"]
+        if dest_steps:
+            outbound_lead = (
+                f"透過 Relay 跨鏈提領至 {dest_steps[0].chain}（收款地址：{dest_steps[0].to_address}）；"
+                f"提領 {dest_steps[0].amount} {dest_steps[0].token}；Tx：{dest_steps[0].tx_hash}；後續尚未充值至已知交易所"
+            )
+        else:
+            outbound_lead = "已辨識銷毀／贖回 pUSD 並轉出至 Relay 跨鏈提領合約"
+    elif redemption_steps:
+        outbound_lead = f"已辨識 {len(redemption_steps)} 筆 pUSD 贖回／出金事件，款項轉出至 Polygon 鏈上其他合約或個人地址"
+    else:
+        outbound_lead = "尚未發現出金提領紀錄（資金仍在帳戶中或已全數投注）"
+
+    # 3. 判定行為畫像
+    if outbound_vasp or (relay_outflows and not direct_vasp and not relay_inbound):
+        portrait_id = "profit_cashout"
+        portrait_title = "【畫像 3：獲利出金退場型】"
+        behavior_summary = "賭客在 Polymarket 結算或獲利後，銷毀／贖回 pUSD 並透過 Relay 跨鏈提領至其他鏈（如 BNB Chain），最終充值進中心化交易所變現。"
+        subpoena_target = outbound_vasp[0].label if outbound_vasp else "出金目的鏈收款地址之後續充值交易所"
+        subpoena_items = "該筆充值入帳之交易所帳號 UID、登入 IP、身分認證（KYC）及綁定提領之法幣銀行帳戶。"
+        investigation_lead = "鎖定出金目的鏈交易所充值交易雜湊，發函向交易所調取充值受款人實名身分，順藤摸瓜查獲賭客提領法幣帳戶。"
+        breakthrough_rating = "高（出金變現可調證）" if outbound_vasp else "中（出金目的鏈已鎖定，待追查後續充值）"
+        limitations = "出金目的鏈之個人錢包若經多次轉帳拆分或與既有餘額混合，需比對金額時間以確認款項關聯性。"
+    elif direct_vasp:
+        portrait_id = "novice_direct"
+        portrait_title = "【畫像 1：新手直充型】"
+        behavior_summary = "賭客為了下注 Polymarket，直接由中心化交易所（如 MAX、BitoPro、Binance）提幣或透過信用卡入金商直充至下注地址。"
+        subpoena_target = direct_vasp[0].label
+        subpoena_items = "該筆提幣出金之帳號 UID、登入 IP、實名身分認證（KYC）及綁定扣款／入金之法幣銀行帳戶。"
+        investigation_lead = "持該筆交易所提幣交易雜湊（Tx Hash）與受款地址，直接發函向該交易所調取開戶人資料，破案最快最直接。"
+        breakthrough_rating = "極高（交易所直連，100% 破案率）"
+        limitations = "交易所出金熱錢包標籤已確認，直接對應提幣帳號紀錄，具高度法證關聯性。"
+    elif relay_inbound:
+        portrait_id = "cross_chain"
+        portrait_title = "【畫像 2：官網跨鏈型】"
+        behavior_summary = "賭客在其他鏈（如 BNB Chain、Ethereum）持有穩定幣，透過 Polymarket 官網內建之 Relay Protocol 跨鏈轉換為 Polygon pUSD 下注；純屬使用官網便捷跨鏈功能，非刻意洗錢。"
+        subpoena_target = relay_source_chain_vasp[0].label if relay_source_chain_vasp else "來源鏈出資地址之上游出資交易所"
+        subpoena_items = "來源鏈交易發起端之交易所帳號 UID、登入 IP、KYC 證件及綁定之法幣銀行帳戶。"
+        investigation_lead = "檢附來源鏈（如 BNB Chain）之出資交易雜湊與來源錢包，發函向來源交易所調取該筆提幣帳戶；或向 Relay 官方調取發起連線 IP 作為技術佐證。"
+        breakthrough_rating = "中高（穿透至來源鏈出資點）" if relay_source_chain_vasp else "中（已鎖定來源鏈出資錢包，待續查開戶出金點）"
+        limitations = "⚠️ 嚴禁把 Relay 官方當作調證終點！Relay 是去中心化中繼協議，無自然人 KYC。真正實名破口在來源鏈出資端交易所。"
+    elif eoa_inbounds:
+        portrait_id = "eoa_hodler"
+        portrait_title = "【畫像 4：幣圈囤幣（非託管私鑰）型】"
+        behavior_summary = "賭客為幣圈老手或持有加密貨幣，資產常年放在 MetaMask、Ledger 等非託管私鑰錢包，下注時由個人錢包直接轉入或經由場外 OTC 互轉，無中心化交易所直接中介。"
+        subpoena_target = gas_vasp[0].label if gas_vasp else "轉出人個人錢包之創立 Gas 出資交易所"
+        subpoena_items = "該筆燃料手續費提幣出金之帳號 UID、登入 IP 與實名身分認證（KYC）；若無交易所，需搭配通訊電信與實體設備搜索。"
+        investigation_lead = "鎖定大額轉出人錢包，將其貼入本工具追查創立時的第一筆原生 POL 手續費（開戶 Gas）出資交易所；或搭配場外通訊與搜索扣案實體載具。"
+        breakthrough_rating = "中（已命中開戶 Gas 交易所）" if gas_vasp else "需延伸（純私鑰互轉，依賴開戶 Gas 或實體載具）"
+        limitations = "⚠️ 純鏈上非託管個人私鑰互轉無中心化開戶資料，無法直接向區塊鏈網路函調自然人身分；法證破口在於出資錢包之開戶手續費來源。"
+    else:
+        portrait_id = "internal_contract"
+        portrait_title = "【畫像 5：平台內部合約／造市結算型】"
+        behavior_summary = "地址資金主要來自零地址鑄造（Minting）、做市回饋金（Maker Rebates）撥付或合約結算，非外部新入金。"
+        subpoena_target = "無（平台內部合約事件，不具調證價值）"
+        subpoena_items = "不適用。"
+        investigation_lead = "該筆資金屬於平台費用或做市回饋金撥付，非涉案人外部入金本金，不建議發文函調。"
+        breakthrough_rating = "無（平台內部結算）"
+        limitations = "平台合約內部結算與回饋金池撥款不屬於外部自然人入金，無法向交易所調取身分。"
+
+    history_solution = ""
+    is_truncated = (
+        bool(result.time_filter.get("is_truncated"))
+        or bool(result.incomplete_tracks)
+        or any(w in " ".join(result.warnings) for w in ("單次上限", "查詢上限", "尚未完整"))
+    )
+    if is_truncated:
+        history_solution = (
+            "本案已達公開 API 查詢上限（最多約 250～600 筆）；若欲追查更早的歷史入金，"
+            "請使用左欄「匯入 PolygonScan 歷史 CSV 索引」（支援 5,000+ 筆完整記錄秒載），或設定「歷史時間錨定」聚焦案發區間。"
+        )
+
+    return {
+        "portrait_id": portrait_id,
+        "portrait_title": portrait_title,
+        "behavior_summary": behavior_summary,
+        "inbound_exchange": inbound_lead,
+        "outbound_exchange": outbound_lead,
+        "subpoena_target": subpoena_target,
+        "subpoena_items": subpoena_items,
+        "investigation_lead": investigation_lead,
+        "breakthrough_rating": breakthrough_rating,
+        "limitations": limitations,
+        "history_solution": history_solution,
+    }
 
 
 class Analyzer:
@@ -297,7 +506,8 @@ class Analyzer:
         1. 針對每一個步驟指派入金路徑分類（path_category）
         2. 同步定向檢索軌道 audit（query_tracks），記錄成功、截斷或錯誤原因
         3. 產出法證函調候選清單（subpoena_candidates）
-        4. 彙整去重警告與來源
+        4. 自動判定涉案賭客 4+1 資金行為畫像（suspect_profile）
+        5. 彙整去重警告與來源
         """
         for step in result.steps:
             if not getattr(step, "path_category", "") or step.path_category == "未能分類":
@@ -351,6 +561,29 @@ class Analyzer:
                     f"資料不完整（未完成軌道：{'、'.join(result.incomplete_tracks) or '待確認'}）；"
                     f"{candidate.limitations}"
                 )
+
+        profile = determine_suspect_profile(result)
+        result.suspect_profile = profile
+
+        if not any("【涉案賭客資金畫像】" in line for line in result.summary):
+            lead_lines = [
+                f"【涉案賭客資金畫像】{profile['portrait_title']}（破案機會：{profile['breakthrough_rating']}）",
+                f"• 行為特徵：{profile['behavior_summary']}",
+                f"• 📥 入金出資線索：{profile['inbound_exchange']}",
+                f"• 📤 出金變現線索：{profile['outbound_exchange']}",
+                f"• ⚖️ 核心調證對象：{profile['subpoena_target']}（調取：{profile['subpoena_items']}）",
+                f"• 🔍 偵查破口處方：{profile['investigation_lead']}",
+                f"• ⚠️ 法律與技術邊界：{profile['limitations']}",
+            ]
+            if profile.get("history_solution"):
+                lead_lines.append(f"• ⏱️ 歷史資料受限處方：{profile['history_solution']}")
+
+            if result.summary:
+                for idx, line in enumerate(lead_lines, start=1):
+                    result.summary.insert(idx, line)
+            else:
+                result.summary.extend(lead_lines)
+
         result.warnings = list(dict.fromkeys(result.warnings))
         result.sources = list(dict.fromkeys(result.sources))
         return result

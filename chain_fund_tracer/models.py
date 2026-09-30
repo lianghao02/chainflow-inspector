@@ -129,6 +129,7 @@ class AnalysisResult:
     query_tracks: dict[str, dict[str, Any]] = field(default_factory=dict)
     analysis_status: str = "complete"
     incomplete_tracks: list[str] = field(default_factory=list)
+    suspect_profile: dict[str, Any] = field(default_factory=dict)
 
     def add_evidence(self, name: str, source: str, data: Any) -> None:
         """保存本次分析取得的資料快照；雜湊於匯出證據包時產生。"""
@@ -158,6 +159,7 @@ class AnalysisResult:
             "query_tracks": dict(self.query_tracks),
             "analysis_status": self.analysis_status,
             "incomplete_tracks": list(self.incomplete_tracks),
+            "suspect_profile": dict(self.suspect_profile),
         }
 
     @classmethod
@@ -184,6 +186,7 @@ class AnalysisResult:
             query_tracks=dict(data.get("query_tracks", {})),
             analysis_status=str(data.get("analysis_status", "complete")),
             incomplete_tracks=list(data.get("incomplete_tracks", [])),
+            suspect_profile=dict(data.get("suspect_profile", {})),
         )
 
 def timestamp_to_text(value: Any) -> str:

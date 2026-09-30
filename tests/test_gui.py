@@ -17,6 +17,14 @@ def has_display() -> bool:
 
 @unittest.skipIf(not has_display(), "無 GUI 視窗顯示環境，安全略過 Tkinter 介面測試")
 class GuiFlowTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            r = tk.Tk()
+            r.withdraw()
+            r.destroy()
+        except Exception:
+            self.skipTest("無可用 Tkinter/Tcl 環境")
+
     def test_vertical_evidence_chain_shows_time_and_bridge_elapsed(self):
         root = tk.Tk()
         root.withdraw()
@@ -244,8 +252,11 @@ class GuiFlowTests(unittest.TestCase):
     def test_csv_entry_and_validation_status(self):
         import tempfile
         import os
-        root = tk.Tk()
-        root.withdraw()
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except (tk.TclError, Exception):
+            self.skipTest("Tcl/Tk 無法初始化")
         try:
             app = App(root)
             root.update_idletasks()
