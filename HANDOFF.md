@@ -1,16 +1,16 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十輪已完成 Git 發布前審查：修正定向代幣查詢覆寫一般歷史查詢範圍的稽核問題，統一版本與 README，隔離本機設定、案件歷史、報告及 CSV；105 項測試與語法檢查通過。本機 Git 已初始化並提交，GitHub 遠端建立因須由使用者明確確認目的帳號及公開鏈上識別資料上傳範圍而暫停。**
+> **第三十輪已完成 GitHub 公開發布：修正定向代幣查詢覆寫一般歷史查詢範圍的稽核問題，統一版本與 README，隔離本機設定、案件歷史、報告及 CSV；105 項測試與語法檢查通過。專案已同步至公開 Repository `lianghao02/chainflow-inspector`。**
 
 ## 核心元資料
 
-- **Repository**：`chain-fund-tracer`（本機 Git；預定私人遠端 `lianghao02/chainflow-inspector`，尚待明確授權）
+- **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
 - **Baseline Commit SHA**：`8d5de17`（初始可交付版本；交接文件後續提交以 Git HEAD 為準）
 - **Software Version**：`v1.3.0`（4 軌核心儲備代幣定向打撈、候選法證優先級排序、CSV 截斷自動容錯）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
-- **Task Type**：RELEASE（本機發布準備完成；GitHub 同步待明確授權）
+- **Task Type**：RELEASE（GitHub 公開 Repository 已同步）
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
 
