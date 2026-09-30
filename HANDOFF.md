@@ -1,20 +1,101 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十輪已完成 GitHub 公開發布：修正定向代幣查詢覆寫一般歷史查詢範圍的稽核問題，統一版本與 README，隔離本機設定、案件歷史、報告及 CSV；105 項測試與語法檢查通過。專案已同步至公開 Repository `lianghao02/chainflow-inspector`。**
+> **第三十一輪已完成 HTML 工作台全面改版（PyWebView + 本機 HTML/CSS/原生 JS）與法證可靠性補強（入金 7 大路徑分類、函調候選清單提煉、4 軌核心儲備代幣透明稽核）；110 項測試與語法檢查通過；4 個真實案件地址實機核覈通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
-- **Baseline Commit SHA**：`8d5de17`（初始可交付版本；交接文件後續提交以 Git HEAD 為準）
-- **Software Version**：`v1.3.0`（4 軌核心儲備代幣定向打撈、候選法證優先級排序、CSV 截斷自動容錯）
+- **Baseline Commit SHA**：`7a494b7`
+- **Software Version**：`v1.4.0`（PyWebView 現代化法證工作台、入金 7 大路徑分類、函調候選清單提煉、核心儲備代幣透明稽核）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
-- **Task Type**：RELEASE（GitHub 公開 Repository 已同步）
+- **Task Type**：IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
 
 ---
+
+## 第三十一輪完成工作：HTML 介面全面替換（PyWebView）與法證可靠性補強（入金 7 大分類、函調清單提煉與 4 軌透明稽核）
+
+### 一、法證可靠性補強（核心底層強化）
+
+1. **新增「函調候選清單」（Subpoena Candidates）資料模型**：
+   - 於 `chain_fund_tracer/models.py` 新增 `SubpoenaCandidate` 模型，欄位涵蓋：候選服務商、類型（中心化交易所／入金服務商／非託管個人錢包等）、關聯層級（逐筆本金／資金池關聯／輔助線索）、鏈別與地址、交易資料（Tx Hash、UTC+8 時間、資產、金額）、標籤依據、函調價值（`可函調 KYC` / `僅供上游追蹤` / `不可作 KYC 終點`）與法定法證限制說明。
+   - `AnalysisResult` 新增 `subpoena_candidates` 與 `query_tracks` 屬性，並更新完整序列化與反序列化函式。
+2. **入金 7 大路徑客觀分類（`classify_path_category`）**：
+   - 於 `chain_fund_tracer/analysis.py` 實作自動分類器，將所有入金步驟精確歸納至：
+     - `交易所直提`（經公開標籤確認之 CEX 熱錢包）
+     - `跨鏈橋／Relay`（同鏈／跨鏈 Relay 兌換與撥付）
+     - `法幣／信用卡入金服務商`（MoonPay、Ramp 等出資通道）
+     - `DEX 兌換`（Uniswap、QuickSwap 等流動池）
+     - `外部錢包轉入`（未具公開標籤之外部 EOA 錢包）
+     - `Polymarket 平台內部回款／贖回`（CTFExchange、NegRisk 合約結算與贖回）
+     - `未能分類`（無法明確識別型態者）
+3. **函調候選清單提煉器（`build_subpoena_candidates`）**：
+   - 自動過濾平台內部結算合約與兌換合約，針對命中中心化交易所之入金標註 `[可函調 KYC]`，針對個人轉入標註 `[僅供上游追蹤]`，針對資金池混合標註法證限制（「資金池混合，非逐筆歸屬」），杜絕把中繼節點或平台合約誤列為 KYC 調證對象。
+4. **定向代幣查詢軌道透明稽核（`targeted_track_audit`）**：
+   - 在 `PolygonProvider.targeted_inbound_token_transfers` 中建立完整軌道稽核機制，逐軌（USDC、USDC.e、pUSD、USDT）記錄檢索狀態（`success` / `truncated` / `error`）、掃描頁數、取得筆數、起訖區塊與錯誤明細；全面移除 `except Exception: pass` 靜默略過行為。
+   - 若觸及單次上限（預設 5 頁 250 筆），於報告與清單公開提示「此幣別歷史尚未完整；未命中不代表沒有更早入金」，杜絕偽陰性結論。
+5. **匯出功能擴充**：
+   - 在 `chain_fund_tracer/exporters.py` 新增 `export_subpoena_csv()`，並在「匯出證據包」ZIP 檔案內自動整合 `subpoena_candidates.csv`。
+
+---
+
+### 二、PyWebView 現代化法證工作台（全面取代 Tkinter 介面）
+
+1. **技術架構與邊界守則**：
+   - 採用 **PyWebView + 本機 HTML/CSS/原生 JS** 單一桌面應用架構，不使用 React、Vue、Node.js，不啟動本機 HTTP 伺服器，不開放網頁直連 RPC，API Key 僅保留於本機 `settings.json`。
+   - 保留既有 Tkinter 介面作為無 WebView 環境時的自動備援。
+2. **控制器橋樑（`chain_fund_tracer/controller.py`）**：
+   - 負責串接前端 JS 與後端分析核心，提供非同步背景查詢執行、安全中斷（Cancel）、PyWebView 原生檔案選擇器（`select_csv_file`）、CSV 離線預檢（`inspect_csv`）、報告與證據包匯出（`export_report`）及歷史快照讀寫。
+3. **可互動 SVG 資金流程圖譜（`chain_fund_tracer/ui/graph.js`）**：
+   - 實作平移（Pan）、縮放（Zoom）、滾輪縮放、重設視角（Reset View）。
+   - 保留實線（逐筆本金）、虛線（資金池關聯）、點線（原生供資）語意線型。
+   - 支援 6 大維度圖譜過濾：全部、本金主線、跨鏈／Relay、資金池關聯、平台內部、出金。
+   - 節點與箭頭點選事件即時同步右側 Inspector 證據卡片。
+4. **高資訊密度前端工作台（`chain_fund_tracer/ui/`）**：
+   - `styles.css`：法證深色主題、狀態燈號（綠色已確認、藍色高度可能、黃色僅資金關聯、灰色未知）、高對比等寬字型排版。
+   - `index.html`：經典三欄佈局（左欄查詢設定、中欄 SVG 流程圖、右欄全高證據 Inspector）＋ 底部五大頁籤資料抽屜。
+   - `app.js`：前端資料綁定、即時進度條回呼（`window.__onProgress`）、步驟卡片清單、以及底部 5 大資料頁籤切換：
+     - 🎯 **Polymarket 投注解碼**：表格呈現題目、買賣方向、選項、份額、下注金額與交易雜湊。
+     - 💰 **入金路徑**：表格呈現 7 大路徑分類、來源、目標、金額與證據等級。
+     - ⚖️ **函調候選清單**：表格呈現候選服務商、函調價值燈號、鏈別、地址、金額、限制說明與 CSV 匯出按鈕。
+     - 📜 **查詢狀態與稽核軌道**：即時顯示 USDC、USDC.e、pUSD、USDT 各軌掃描頁數、筆數與截斷警示。
+     - 📄 **法證文字報告**：完整保留法律客觀用語之純文字案件報告，支援一鍵複製與搜尋。
+
+---
+
+### 三、實機鏈上核覈（4 個真實目標地址驗證）
+
+1. **案例一：`0xcceb22d524e186153cffe79f13c0aeb75889f030`（高頻撮合中精準穿透幣安出金）**：
+   - 歷史 CSV 達 5,000 筆上限，觸發定向代幣查詢補強。
+   - **精準穿透幣安熱錢包出金**：成功命中 3 筆幣安熱錢包 48（`0xe2fc31f816a9b94326492132018c3aecc4a93ae1`）直接轉入（合計 1,010.6647 USDC）。
+   - **函調清單提煉**：提煉出 3 筆 `[可函調 KYC] Binance (中心化交易所)`，路徑分類精準歸為 `交易所直提`。
+   - **軌道透明揭露**：USDC（成功，3 筆）、USDC.e（截斷 250 筆）、pUSD（截斷 250 筆）、USDT（成功，0 筆），明確揭露部分歷史未完整警示。
+2. **案例二：`0x89e122ce705d2234c01a78126cbbcc836c32b640`（跨鏈 Relay 穿透與投注解碼）**：
+   - 耗時 20.8 秒分析 25 步。
+   - 精準配對 4 筆 Relay 跨鏈路徑與底層資產（USDC.e）。
+   - 辨識 8 筆 Polymarket 鏈上投注交易，精準還原市場題目與選項。
+   - 提煉 12 筆非託管個人錢包線索至函調清單（`[僅供上游追蹤]`）。
+3. **案例三：`0xbf632e89c24dc8b18755f8ec333f01984d7256ca`（同鏈 Relay 穿透與多層線型）**：
+   - 耗時 5.85 秒秒速穿透同鏈 Relay（100 USDC 轉為 99.991114 pUSD），路徑分類為 `跨鏈橋／Relay`。
+   - 自動生成三層線型：實線本金流、虛線 MoonPay 30,000 USDC 資金池線索、點線 OKX 200.36 POL 燃料供資線索。
+4. **案例四：`0x5b6331e7ff0831a3fe2ed12004747db1a9c911a4`（高頻 pUSD 鑄造與翻頁截斷揭露）**：
+   - 耗時 25.4 秒分析 47 步。
+   - 逐筆核對 17 筆 pUSD 鑄造 Receipt，辨識 44 筆內部回款與投注交易。
+   - 250 筆 pUSD 翻頁達到單次上限後，客觀揭露截斷狀態，真實記錄公開 API 異常，無任何靜默掩蓋。
+
+---
+
+### 四、驗證與測試指標
+
+1. **靜態語法檢查**：`python -m compileall -q chain_fund_tracer tests app.py` 零錯誤通過。
+2. **全套單元測試**：`python -m unittest discover -s tests -p "test_*.py"` 執行 **110 題測試全數通過**（110 tests OK，0 失敗、0 錯誤）。
+3. **啟動入口切換**：`app.py` 預設直接啟動 `webview_app.launch()`，雙擊 `run.bat` 即刻以本機 WebView2 呈現現代化介面。
+
+---
+
 
 ## 第二十九輪完成工作：核心儲備代幣定向打撈架構、Config-First 設定化與法證三層分級
 

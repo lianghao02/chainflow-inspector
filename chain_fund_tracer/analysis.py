@@ -4,7 +4,7 @@ from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
-from .models import AnalysisResult, TraceStep, Transfer, timestamp_to_text
+from .models import AnalysisResult, SubpoenaCandidate, TraceStep, Transfer, timestamp_to_text
 from .providers import PolygonProvider, ProviderError
 from .relay_evidence import amount_text, exact_pair, explorer_url, same_chain_request_match
 ADDRESS = re.compile(r"^0x[a-fA-F0-9]{40}$")
@@ -88,10 +88,194 @@ def event_timestamp(value: Any) -> float:
     except (ValueError, TypeError):
         return 0.0
 
+def classify_path_category(step: TraceStep) -> str:
+    """將 TraceStep 統一歸類為 7 種入金／資金路徑之一：
+    - 交易所直提
+    - 跨鏈橋／Relay
+    - 法幣／信用卡入金服務商
+    - DEX 兌換
+    - Polymarket 平台內部回款／贖回
+    - 外部錢包轉入
+    - 未能分類
+    """
+    from_addr = normalize(step.from_address)
+    to_addr = normalize(step.to_address)
+    lbl = (step.label or "").lower()
+    cls_name = step.classification or ""
+
+    if (
+        step.path_role in ("內部", "平台內部")
+        or step.direction in ("Polymarket 投注", "Polymarket 結算")
+        or from_addr in POLYMARKET_INTERNAL
+        or to_addr in POLYMARKET_INTERNAL
+        or cls_name == "Polymarket"
+        or "polymarket" in lbl
+        or "conditional tokens" in lbl
+        or "settlement" in lbl
+    ):
+        return "Polymarket 平台內部回款／贖回"
+
+    if (
+        step.relay_request_id
+        or cls_name == "Bridge"
+        or "relay" in lbl
+        or "bridge" in lbl
+        or "depository" in lbl
+        or "socket" in lbl
+        or "cctp" in lbl
+    ):
+        return "跨鏈橋／Relay"
+
+    if cls_name == "入金服務商" or any(w in lbl for w in ("moonpay", "simplex", "transak", "banxa", "ramp network")):
+        return "法幣／信用卡入金服務商"
+
+    exchange_keywords = ("binance", "okx", "bitget", "bybit", "coinbase", "kraken", "mexc", "gate.io", "max exchange", "bito")
+    if (
+        cls_name in ("交易所", "VASP")
+        or (lbl and any(w in lbl for w in exchange_keywords) and "router" not in lbl and "dex" not in lbl)
+    ):
+        return "交易所直提"
+
+    if cls_name == "DEX" or any(w in lbl for w in ("dex", "router", "swap", "uniswap", "quickswap")):
+        return "DEX 兌換"
+
+    if cls_name in ("外部錢包", "未知地址") or not lbl or cls_name == "個人錢包":
+        return "外部錢包轉入"
+
+    return "未能分類"
+
+def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]:
+    """從分析步驟中提煉法證「函調候選清單」，排除純平台內部合約與無函調價值的純雜訊，
+    並區分可函調 KYC、僅供上游追蹤與不可作 KYC 終點。
+    """
+    candidates: list[SubpoenaCandidate] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+
+    for step in result.steps:
+        # 跳過平台內部回款與純下注合約
+        if step.path_category == "Polymarket 平台內部回款／贖回":
+            continue
+
+        key = (step.tx_hash.lower(), step.from_address.lower(), step.to_address.lower())
+        if key in seen_keys:
+            continue
+
+        lbl = step.label or ""
+        lbl_lower = lbl.lower()
+        cls_name = step.classification or ""
+        cat = step.path_category or classify_path_category(step)
+
+        service_provider = ""
+        service_type = ""
+        inquiry_value = "僅供上游追蹤"
+        limitations = ""
+
+        if cat == "交易所直提":
+            for ex in ("Binance", "OKX", "Bitget", "Bybit", "Coinbase", "Kraken", "MEXC", "Gate.io", "MAX Exchange", "BitoPro"):
+                if ex.lower() in lbl_lower:
+                    service_provider = ex
+                    break
+            if not service_provider:
+                service_provider = lbl or "未具名交易所"
+            service_type = "中心化交易所"
+            inquiry_value = "可函調 KYC"
+            limitations = "交易所出金熱錢包；非個人專屬充值地址，需向交易所調取該筆提幣 UID、登入 IP 與 KYC 身分。"
+
+        elif cat == "法幣／信用卡入金服務商":
+            for sp in ("MoonPay", "Simplex", "Transak", "Banxa", "Ramp Network"):
+                if sp.lower() in lbl_lower:
+                    service_provider = sp
+                    break
+            if not service_provider:
+                service_provider = lbl or "法幣入金商"
+            service_type = "法幣入金服務商"
+            inquiry_value = "可函調 KYC"
+            limitations = "法幣出金商直充；需持 Tx Hash 與受款地址向服務商調取刷卡訂單人與 KYC 身分。"
+
+        elif cat == "跨鏈橋／Relay":
+            service_provider = "Relay" if "relay" in lbl_lower or step.relay_request_id else (lbl or "跨鏈協議")
+            service_type = "跨鏈橋／Relay"
+            inquiry_value = "僅供上游追蹤"
+            limitations = "去中心化跨鏈協議；無中心化 KYC 身分，僅供向上追蹤來源鏈發送者與關聯地址。"
+
+        elif cat == "DEX 兌換":
+            service_provider = lbl or "DEX Router"
+            service_type = "DEX 兌換"
+            inquiry_value = "不可作 KYC 終點"
+            limitations = "去中心化撮合合約，無中心化開戶資料；不可列為 KYC 調查對象，僅供判定資產轉換。"
+
+        elif cat == "外部錢包轉入":
+            service_provider = "外部個人錢包"
+            service_type = "非託管個人錢包"
+            inquiry_value = "僅供上游追蹤"
+            limitations = "鏈上非託管個人地址；需向上游追蹤其手續費來源或交易所提領紀錄。"
+
+        else:
+            continue
+
+        association_level = "逐筆本金" if (step.line_style == "solid" and step.event_role in ("補款", "底層資產投入", "轉帳", "跨鏈橋入金")) else "資金池關聯"
+        if step.line_style in ("dashed", "dotted") or step.event_role == "手續費供資":
+            association_level = "輔助線索"
+
+        candidate = SubpoenaCandidate(
+            service_provider=service_provider,
+            service_type=service_type,
+            association_level=association_level,
+            chain=step.chain or "Polygon",
+            from_address=step.from_address,
+            to_address=step.to_address,
+            tx_hash=step.tx_hash,
+            datetime_tw=step.timestamp,
+            asset=step.token,
+            amount=step.amount,
+            label_basis=step.label_source or "鏈上公開紀錄",
+            inquiry_value=inquiry_value,
+            limitations=limitations,
+        )
+        seen_keys.add(key)
+        candidates.append(candidate)
+
+    order = {"可函調 KYC": 0, "僅供上游追蹤": 1, "不可作 KYC 終點": 2}
+    candidates.sort(key=lambda c: (order.get(c.inquiry_value, 3), -event_timestamp(c.datetime_tw)))
+    return candidates
+
 class Analyzer:
     def __init__(self, provider: PolygonProvider, progress: Callable[[str], None] | None = None):
         self.provider = provider
         self.progress = progress or (lambda _message: None)
+
+    def finalize_analysis_result(self, result: AnalysisResult) -> AnalysisResult:
+        """對分析結果進行法證收斂、分類指派與狀態稽核：
+        1. 針對每一個步驟指派入金路徑分類（path_category）
+        2. 同步定向檢索軌道 audit（query_tracks），記錄成功、截斷或錯誤原因
+        3. 產出法證函調候選清單（subpoena_candidates）
+        4. 彙整去重警告與來源
+        """
+        for step in result.steps:
+            if not getattr(step, "path_category", "") or step.path_category == "未能分類":
+                step.path_category = classify_path_category(step)
+
+        tracks = dict(getattr(self.provider, "targeted_track_audit", {}))
+        if tracks:
+            result.query_tracks = tracks
+            for tok, info in tracks.items():
+                sym = info.get("symbol", "代幣")
+                if info.get("status") == "error":
+                    result.warnings.append(
+                        f"定向入金檢索【{sym}】查詢失敗：{info.get('error_message')}；該幣別可能遺漏早前補款。"
+                    )
+                elif info.get("is_truncated"):
+                    pages = info.get("pages_scanned", 0)
+                    count = info.get("items_count", 0)
+                    result.warnings.append(
+                        f"定向入金檢索【{sym}】已達單次上限（已掃描 {pages} 頁共 {count} 筆），此幣別歷史記錄尚未完整；未命中不代表沒有更早的入金。"
+                    )
+
+        result.subpoena_candidates = build_subpoena_candidates(result)
+        result.warnings = list(dict.fromkeys(result.warnings))
+        result.sources = list(dict.fromkeys(result.sources))
+        return result
+
     def validate(self, query: str) -> str:
         query = query.strip()
         if not (ADDRESS.fullmatch(query) or TX_HASH.fullmatch(query)): raise ValueError("請輸入有效的 EVM 錢包地址（42 字元）或交易雜湊（66 字元）。")
@@ -144,7 +328,7 @@ class Analyzer:
         result.steps = self._trace(seeds, hops)
         if not result.steps: result.warnings.append("未取得可延伸的公開交易紀錄。公共 API 可能限流、資料尚未索引，或地址沒有近期交易。")
         result.warnings.append("本工具僅呈現公開鏈上關聯；地址、資金流與交易所標籤均不等於自然人身分或帳戶控制權。")
-        return result
+        return self.finalize_analysis_result(result)
 
     def analyze_polymarket_funding(
         self,
@@ -295,7 +479,7 @@ class Analyzer:
         if any_underlying and not relay_found:
             result.warnings.append("已找到pUSD底層資金地址，但未在Relay公開索引中命中跨鏈請求；將其保留為外部資金候選，不推測來源鏈。")
         result.warnings.append("命中交易所公開標籤只代表資金關聯；KYC、提幣與登入資料必須依正式程序向服務商調取。")
-        return result
+        return self.finalize_analysis_result(result)
 
     def _analyze_polymarket_address(
         self,
@@ -389,8 +573,8 @@ class Analyzer:
                             if h_norm not in seen_cand_hashes:
                                 seen_cand_hashes.add(h_norm)
                                 all_candidates.append(tc)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    result.warnings.append(f"核心儲備代幣定向檢索異常：{exc}")
 
             sorted_candidates = self._prioritize_candidates(all_candidates)
             if cutoff > 0:
@@ -440,8 +624,8 @@ class Analyzer:
                         if t_key not in seen_keys:
                             seen_keys.add(t_key)
                             history.append(t_ev)
-            except Exception:
-                pass
+            except Exception as exc:
+                result.warnings.append(f"核心儲備代幣定向檢索異常：{exc}")
 
             if result.time_filter:
                 result.time_filter["scanned_transfer_count"] = scanned_count
@@ -611,7 +795,7 @@ class Analyzer:
             result.summary.append(f"【入金來源結論】逐筆本金主線尚未命中可確認的交易所／VASP 公開標籤；{relay_note}{suffix}")
         result.warnings = list(dict.fromkeys(result.warnings))
         result.sources = list(dict.fromkeys(result.sources))
-        return result
+        return self.finalize_analysis_result(result)
     def _prioritize_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """針對入金候選進行三層法證優先級排序：
         - 第一層：已確認之中心化交易所／VASP 公開出金標籤

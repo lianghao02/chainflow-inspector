@@ -171,3 +171,30 @@ def clear_history() -> None:
             idx.unlink()
         except OSError:
             pass
+
+
+def delete_history_entry(entry_id: str) -> bool:
+    """刪除指定 ID 之歷史紀錄項目及其快照檔案。"""
+    h_dir = get_history_dir()
+    current_list = list_history_entries()
+    target_entry = next((item for item in current_list if item.id == entry_id), None)
+    if not target_entry:
+        return False
+
+    snapshot_path = h_dir / target_entry.snapshot_file
+    if snapshot_path.is_file():
+        try:
+            snapshot_path.unlink()
+        except OSError:
+            pass
+
+    new_list = [item for item in current_list if item.id != entry_id]
+    index_file_path().write_text(
+        json.dumps([item.to_dict() for item in new_list], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return True
+
+
+load_history_entry = load_history_snapshot
+

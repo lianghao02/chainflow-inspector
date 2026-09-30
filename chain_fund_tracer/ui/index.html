@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chain Fund Tracer - 區塊鏈資金追蹤與反洗錢法證平台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- 頂部導覽列 Header -->
+  <header>
+    <div class="brand">
+      <span class="brand-icon">🛡️</span>
+      <span class="brand-title">Chain Fund Tracer</span>
+      <span class="brand-subtitle">Polymarket 資金鏈穿透與 VASP 法證查核</span>
+    </div>
+    <div class="header-actions">
+      <!-- 歷史紀錄快照下拉選單 -->
+      <select id="historySelect" style="width: 260px;">
+        <option value="">-- 載入歷史紀錄快照 --</option>
+      </select>
+
+      <!-- 匯出按鈕組 -->
+      <div style="display: flex; gap: 4px;">
+        <button class="primary" data-export="zip" title="匯出完整法證證據包（包含 SHA-256 清冊、原始快照與報告）">📦 證據包 ZIP</button>
+        <button data-export="subpoena_csv" title="匯出函調候選清單 CSV（提供司法警察函調 KYC 用）">⚖️ 函調 CSV</button>
+        <button data-export="csv" title="匯出所有資金追蹤步驟 CSV">📊 步驟 CSV</button>
+        <button data-export="txt" title="匯出完整法證查核文字記錄">📄 文字報告</button>
+        <button data-export="svg" title="匯出向量圖形 SVG">🖼️ 流程圖</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主三欄工作台 -->
+  <div class="main-container">
+
+    <!-- 左欄：輸入與參數設定 -->
+    <div class="left-pane">
+      <div class="pane-section">
+        <div class="pane-section-title">案件與追蹤目標</div>
+        <div class="form-group">
+          <label for="queryInput">Polygon 地址或下注交易雜湊</label>
+          <input type="text" id="queryInput" placeholder="0x... 或貼上 PolygonScan 網址" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="modeSelect">分析模式</label>
+          <select id="modeSelect">
+            <option value="polymarket">Polymarket 資金鏈穿透（推薦）</option>
+            <option value="general">一般地址／交易圖譜追蹤</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="pane-section">
+        <div class="pane-section-title">時間範圍與歷史索引</div>
+        <div class="form-group">
+          <label for="timeInput">歷史時間錨定（UTC+8）</label>
+          <input type="text" id="timeInput" placeholder="例如：2024-05-15 或 2024-05-15 14:30">
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 3px;">
+            鎖定該時間之前的資金流，排除之後的高頻無關金流。
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="csvInput">匯入 PolygonScan 歷史 CSV 索引</label>
+          <div class="csv-picker-box">
+            <input type="text" id="csvInput" placeholder="尚未選取 CSV 檔案" readonly>
+            <button type="button" id="selectCsvBtn">瀏覽...</button>
+          </div>
+          <div id="csvBadge" class="csv-status-badge"></div>
+        </div>
+
+        <div class="form-group">
+          <label for="hopsSelect">追蹤深度 (跳數)</label>
+          <select id="hopsSelect">
+            <option value="1">1 跳（直接入金）</option>
+            <option value="2" selected>2 跳（穿透跨鏈與前手）</option>
+            <option value="3">3 跳（深度關聯）</option>
+            <option value="4">4 跳</option>
+          </select>
+        </div>
+
+        <div class="action-buttons">
+          <button type="button" id="startBtn" class="primary">🚀 開始法證追查</button>
+          <button type="button" id="stopBtn" class="danger" style="display: none;">🛑 停止查詢</button>
+        </div>
+      </div>
+
+      <div class="pane-section" style="flex: 1; overflow-y: auto;">
+        <div class="pane-section-title">核心資產定向檢索說明</div>
+        <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.6;">
+          本系統採用「核心儲備代幣定向打撈」機制，主動鎖定：
+          <ul style="margin-left: 16px; margin-top: 4px; color: var(--text-muted);">
+            <li>Native USDC (<span style="font-family: var(--font-mono);">0x3c49...</span>)</li>
+            <li>USDC.e (<span style="font-family: var(--font-mono);">0x2791...</span>)</li>
+            <li>pUSD (<span style="font-family: var(--font-mono);">0xc011...</span>)</li>
+            <li>USDT (<span style="font-family: var(--font-mono);">0xc213...</span>)</li>
+          </ul>
+          有效避開平台內部高頻撮合與空氣幣空投雜訊，精準提煉可函調之交易所出金來源。
+        </div>
+      </div>
+    </div>
+
+    <!-- 中欄：可互動 SVG 資金圖 -->
+    <div class="center-pane">
+      <div class="graph-toolbar">
+        <div class="filter-pills">
+          <button class="pill-btn active" data-filter="all">全部金流</button>
+          <button class="pill-btn" data-filter="principal">⚡ 本金主線 (實線)</button>
+          <button class="pill-btn" data-filter="relay">🌉 跨鏈／Relay</button>
+          <button class="pill-btn" data-filter="pool">💧 資金池關聯 (虛線)</button>
+          <button class="pill-btn" data-filter="internal">🎯 平台內部／下注</button>
+          <button class="pill-btn" data-filter="outflow">📤 出金</button>
+        </div>
+        <div>
+          <button id="resetViewBtn" style="padding: 3px 8px; font-size: 11px;">🔍 重設視野</button>
+        </div>
+      </div>
+
+      <div class="graph-viewport">
+        <svg id="flowSvg"></svg>
+      </div>
+    </div>
+
+    <!-- 右欄：法證詳情卡片 -->
+    <div class="right-pane">
+      <div class="detail-header">
+        <h3>📋 鏈上證據詳情</h3>
+      </div>
+      <div class="detail-body" id="detailBody">
+        <div class="detail-empty">點選中間圖譜的箭頭或節點<br>檢視完整法證核對數據</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 底欄：5 大資料頁籤抽屜 -->
+  <div class="drawer-container" id="bottomDrawer">
+    <div class="drawer-tabs">
+      <div class="drawer-tab active" data-tab="subpoena">
+        ⚖️ 函調候選清單 <span class="drawer-tab-count" id="countSubpoena">0</span>
+      </div>
+      <div class="drawer-tab" data-tab="betting">
+        🎯 投注解碼 <span class="drawer-tab-count" id="countBetting">0</span>
+      </div>
+      <div class="drawer-tab" data-tab="inbound">
+        💰 入金路徑 <span class="drawer-tab-count" id="countInbound">0</span>
+      </div>
+      <div class="drawer-tab" data-tab="audit">
+        📜 查詢狀態與稽核軌道 <span class="drawer-tab-count" id="countAudit">0</span>
+      </div>
+      <div class="drawer-tab" data-tab="report">
+        📄 法證文字報告
+      </div>
+      <div class="drawer-toggle-btn" id="toggleDrawerBtn" title="展開 / 收合底欄">
+        ⮁ 收合／展開
+      </div>
+    </div>
+
+    <!-- Tab 1: 函調候選清單 (預設高優先展示) -->
+    <div class="drawer-content active" id="tab-subpoena">
+      <table class="data-table" id="subpoenaTable">
+        <thead>
+          <tr>
+            <th>候選服務商</th>
+            <th>服務類型</th>
+            <th>函調價值</th>
+            <th>金額與資產</th>
+            <th>時間 (UTC+8)</th>
+            <th>來源地址 (From)</th>
+            <th>交易雜湊 (Tx)</th>
+            <th>法證限制與函調建議</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="8" style="text-align:center; color:#64748b;">尚未執行查詢或無候選紀錄。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Tab 2: 投注解碼 -->
+    <div class="drawer-content" id="tab-betting">
+      <table class="data-table" id="bettingTable">
+        <thead>
+          <tr>
+            <th>時間 (UTC+8)</th>
+            <th>Polymarket 市場標題</th>
+            <th>下注選項</th>
+            <th>投入金額</th>
+            <th>份額 (Shares)</th>
+            <th>交易雜湊</th>
+            <th>解碼依據</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" style="text-align:center; color:#64748b;">尚未執行查詢或無下注紀錄。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Tab 3: 入金路徑 -->
+    <div class="drawer-content" id="tab-inbound">
+      <table class="data-table" id="inboundTable">
+        <thead>
+          <tr>
+            <th>入金路徑分類</th>
+            <th>金額／代幣</th>
+            <th>交易時間</th>
+            <th>來源節點 (From)</th>
+            <th>交易雜湊</th>
+            <th>證據依據</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="6" style="text-align:center; color:#64748b;">尚未執行查詢或無入金紀錄。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Tab 4: 查詢狀態與稽核軌道 (揭露各幣別歷史完整性) -->
+    <div class="drawer-content" id="tab-audit">
+      <table class="data-table" id="auditTable">
+        <thead>
+          <tr>
+            <th>代幣名稱</th>
+            <th>合約地址</th>
+            <th>檢索狀態</th>
+            <th>掃描頁數／抓取筆數</th>
+            <th>涵蓋區塊範圍</th>
+            <th>異常日誌／未命中原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="6" style="text-align:center; color:#64748b;">尚未執行查詢。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Tab 5: 法證文字報告 -->
+    <div class="drawer-content" id="tab-report" style="padding: 14px;">
+      <pre id="reportTextContent" style="font-family: var(--font-mono); font-size: 11px; color: #cbd5e1; white-space: pre-wrap; line-height: 1.6;"></pre>
+    </div>
+  </div>
+
+  <!-- 底部狀態列 -->
+  <div class="status-bar">
+    <div class="status-indicator">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">系統已就緒</span>
+    </div>
+    <div id="netStatus" style="font-size: 10px;">Polygon RPC: 在線 ｜ Explorer: 在線 ｜ Relay Index: 在線</div>
+  </div>
+
+  <!-- 引用腳本 -->
+  <script src="graph.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

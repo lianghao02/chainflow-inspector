@@ -1,0 +1,583 @@
+/* ==========================================================================
+   Chain Fund Tracer - 法證級深色專業主題 (styles.css)
+   ========================================================================== */
+
+:root {
+  --bg-primary: #0a0e14;
+  --bg-secondary: #121820;
+  --bg-card: #18202c;
+  --bg-card-hover: #1f2b3b;
+  --bg-input: #0f151d;
+  --border-color: #273444;
+  --border-active: #3b82f6;
+
+  --text-primary: #f0f6fc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent-blue: #38bdf8;
+  --accent-cyan: #22d3ee;
+  --accent-purple: #c084fc;
+  --accent-amber: #fbbf24;
+  --accent-emerald: #34d399;
+  --accent-rose: #fb7185;
+
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-danger: #ef4444;
+
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans TC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==========================================================================
+   頂部導覽列 Header
+   ========================================================================== */
+header {
+  height: 48px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  font-size: 18px;
+}
+
+.brand-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+}
+
+.brand-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-color);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ==========================================================================
+   通用按鈕與輸入框
+   ========================================================================== */
+button {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease-in-out;
+}
+
+button:hover {
+  background-color: var(--bg-card-hover);
+  border-color: var(--border-active);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button.primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-color: #3b82f6;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+button.primary:hover {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+}
+
+button.danger {
+  background-color: #991b1b;
+  border-color: #ef4444;
+  color: #fff;
+}
+
+button.danger:hover {
+  background-color: #b91c1c;
+}
+
+input, select, textarea {
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-family);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--border-active);
+}
+
+/* ==========================================================================
+   主要版面結構 (三欄工作台)
+   ========================================================================== */
+.main-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  height: calc(100vh - 48px - 32px); /* 扣除 header 與 bottom bar */
+}
+
+/* 左欄：輸入與參數 */
+.left-pane {
+  width: 320px;
+  min-width: 300px;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.pane-section {
+  padding: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pane-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.form-group input, .form-group select {
+  width: 100%;
+}
+
+.csv-picker-box {
+  display: flex;
+  gap: 6px;
+}
+
+.csv-picker-box input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.csv-status-badge {
+  margin-top: 6px;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: rgba(56, 189, 248, 0.1);
+  color: var(--accent-blue);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  display: none;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.action-buttons button {
+  flex: 1;
+  justify-content: center;
+}
+
+/* 中欄：SVG 資金圖 */
+.center-pane {
+  flex: 1;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.graph-toolbar {
+  height: 40px;
+  background-color: rgba(18, 24, 32, 0.9);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  z-index: 5;
+}
+
+.filter-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.pill-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.pill-btn.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.graph-viewport {
+  flex: 1;
+  position: relative;
+  cursor: grab;
+  overflow: hidden;
+}
+
+.graph-viewport:active {
+  cursor: grabbing;
+}
+
+#flowSvg {
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+/* 右欄：證據詳情卡片 */
+.right-pane {
+  width: 320px;
+  min-width: 280px;
+  background-color: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.detail-header {
+  padding: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.detail-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-body {
+  padding: 14px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.detail-empty {
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 40px;
+  font-size: 12px;
+}
+
+.evidence-kv {
+  margin-bottom: 12px;
+}
+
+.evidence-kv-key {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.evidence-kv-val {
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.evidence-kv-val.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge-vasp { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); border: 1px solid var(--accent-amber); }
+.badge-bridge { background: rgba(192, 132, 252, 0.2); color: var(--accent-purple); border: 1px solid var(--accent-purple); }
+.badge-solid { background: rgba(56, 189, 248, 0.2); color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+.badge-dashed { background: rgba(100, 116, 139, 0.2); color: var(--text-secondary); border: 1px dashed var(--text-secondary); }
+
+/* ==========================================================================
+   底欄 (5 大頁籤資料抽屜)
+   ========================================================================== */
+.drawer-container {
+  height: 240px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: height 0.2s ease;
+  z-index: 8;
+}
+
+.drawer-container.collapsed {
+  height: 32px;
+}
+
+.drawer-tabs {
+  height: 32px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  user-select: none;
+}
+
+.drawer-tab {
+  padding: 0 14px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.drawer-tab:hover {
+  color: var(--text-primary);
+}
+
+.drawer-tab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+  background-color: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.drawer-tab-count {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+.drawer-tab.active .drawer-tab-count {
+  background-color: rgba(56, 189, 248, 0.2);
+  color: var(--accent-blue);
+}
+
+.drawer-toggle-btn {
+  margin-left: auto;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px 8px;
+}
+
+.drawer-content {
+  flex: 1;
+  overflow: auto;
+  background-color: var(--bg-primary);
+  display: none;
+}
+
+.drawer-content.active {
+  display: block;
+}
+
+/* 表格樣式 */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  text-align: left;
+}
+
+.data-table th {
+  background-color: var(--bg-card);
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 8px 12px;
+  position: sticky;
+  top: 0;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(39, 52, 68, 0.5);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.data-table tr:hover {
+  background-color: var(--bg-card-hover);
+}
+
+.data-table .mono {
+  font-family: var(--font-mono);
+}
+
+/* ==========================================================================
+   狀態列與進度指示
+   ========================================================================== */
+.status-bar {
+  height: 24px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--status-success);
+}
+
+.status-dot.busy {
+  background-color: var(--accent-amber);
+  animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+/* 模態對話框 (Modal) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  visibility: hidden;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.modal-overlay.show {
+  visibility: visible;
+  opacity: 1;
+}
+
+.modal-box {
+  width: 520px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 12px 16px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.modal-body {
+  padding: 16px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  padding: 10px 16px;
+  background-color: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

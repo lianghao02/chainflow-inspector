@@ -51,6 +51,7 @@ TOKEN_SYMBOLS = {
     "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb": "pUSD",
     "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": "USDC.e",
     "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "USDC",
+    "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": "USDT",
 }
 BNB_TOKEN_METADATA = {
     "0x55d398326f99059ff775485246999027b3197955": ("USDT", 18),
@@ -95,6 +96,11 @@ class PolygonProvider:
     def __init__(self, settings: Settings):
         self.settings, self._rpc_id = settings, 0
         self.token_history_truncated = False
+        self.token_history_scanned_count = 0
+        self.token_history_min_block: int | None = None
+        self.token_history_max_block: int | None = None
+        self.last_scanned_pages = 0
+        self.targeted_track_audit: dict[str, dict[str, Any]] = {}
     def rpc(self, method: str, params: list[Any]) -> Any:
         self._rpc_id += 1
         payload = {"jsonrpc":"2.0","id":self._rpc_id,"method":method,"params":params}
@@ -405,10 +411,12 @@ class PolygonProvider:
         self.token_history_scanned_count = 0
         self.token_history_min_block: int | None = None
         self.token_history_max_block: int | None = None
+        self.last_scanned_pages = 0
 
         seen_blocks: list[int] = []
 
         for _ in range(limit_pages):
+            self.last_scanned_pages += 1
             data = fetch_json(f"{base}?{urlencode(params)}")
             items = data.get("items", [])
             self.token_history_scanned_count += len(items)
@@ -478,8 +486,11 @@ class PolygonProvider:
             ])
         all_events: list[dict[str, Any]] = []
         seen_keys: set[tuple[str, str]] = set()
+        self.targeted_track_audit = {}
 
         for tok in tokens:
+            tok_norm = tok.lower()
+            sym = TOKEN_SYMBOLS.get(tok_norm, "ERC-20")
             try:
                 tok_events = self.address_token_transfers(
                     address=address,
@@ -489,6 +500,17 @@ class PolygonProvider:
                     filter_dir="to",
                     max_pages=max_pages_per_token,
                 )
+                self.targeted_track_audit[tok_norm] = {
+                    "token": tok,
+                    "symbol": sym,
+                    "status": "truncated" if self.token_history_truncated else "success",
+                    "pages_scanned": self.last_scanned_pages,
+                    "items_count": len(tok_events),
+                    "min_block": self.token_history_min_block,
+                    "max_block": self.token_history_max_block,
+                    "is_truncated": self.token_history_truncated,
+                    "error_message": "",
+                }
                 for ev in tok_events:
                     tx_h = str(ev.get("transaction_hash") or ev.get("tx_hash") or ev.get("hash") or "").lower()
                     log_i = str(ev.get("log_index") or ev.get("index") or "")
@@ -496,8 +518,18 @@ class PolygonProvider:
                     if key not in seen_keys:
                         seen_keys.add(key)
                         all_events.append(ev)
-            except Exception:
-                continue
+            except Exception as exc:
+                self.targeted_track_audit[tok_norm] = {
+                    "token": tok,
+                    "symbol": sym,
+                    "status": "error",
+                    "pages_scanned": getattr(self, "last_scanned_pages", 0),
+                    "items_count": 0,
+                    "min_block": None,
+                    "max_block": None,
+                    "is_truncated": False,
+                    "error_message": str(exc),
+                }
 
         return all_events
 

@@ -20,6 +20,14 @@ class Settings:
         "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",  # USDT
     ])
     custom_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls) -> Settings:
+        return load_settings()
+
+    def save(self) -> None:
+        save_settings(self)
+
 def config_path() -> Path: return Path(__file__).resolve().parent.parent / "settings.json"
 def load_settings() -> Settings:
     try:

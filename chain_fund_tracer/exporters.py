@@ -52,6 +52,34 @@ def export_csv(result: AnalysisResult, path: str) -> None:
             writer.writerow(row)
 
 
+def export_subpoena_csv(result: AnalysisResult, path: str) -> None:
+    """匯出法證函調候選清單 CSV，供檢警調等辦案人員依案發金流發文向交易所或 VASP 調取資料。"""
+    headers = [
+        "service_provider",
+        "service_type",
+        "association_level",
+        "chain",
+        "from_address",
+        "to_address",
+        "tx_hash",
+        "datetime_tw",
+        "asset",
+        "amount",
+        "label_basis",
+        "inquiry_value",
+        "limitations",
+    ]
+    with Path(path).open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=headers)
+        writer.writeheader()
+        for cand in getattr(result, "subpoena_candidates", []):
+            row = cand.to_dict() if hasattr(cand, "to_dict") else dict(cand)
+            for key, value in row.items():
+                if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+                    row[key] = "'" + value
+            writer.writerow(row)
+
+
 def export_evidence_package(result: AnalysisResult, path: str) -> None:
     """匯出可重現查核的 ZIP；SHA-256 是完整性清冊，不是數位簽章。"""
     destination = Path(path)
@@ -60,6 +88,8 @@ def export_evidence_package(result: AnalysisResult, path: str) -> None:
         export_text(result, str(root / "analysis.txt"))
         export_csv(result, str(root / "steps.csv"))
         export_svg(result, str(root / "flow_graph.svg"))
+        if getattr(result, "subpoena_candidates", None):
+            export_subpoena_csv(result, str(root / "subpoena_candidates.csv"))
         evidence_dir = root / "evidence"
         evidence_dir.mkdir()
         for index, record in enumerate(result.evidence_records, start=1):

@@ -60,6 +60,7 @@ class TraceStep:
     pair_verified: bool = False
     trade_info: dict[str, Any] = field(default_factory=dict)
     line_style: str = "solid"
+    path_category: str = "未能分類"
 
     def __post_init__(self) -> None:
         if not self.role_confidence:
@@ -88,6 +89,30 @@ class TraceStep:
         return cls(**{k: v for k, v in data.items() if k in valid_keys})
 
 @dataclass
+class SubpoenaCandidate:
+    service_provider: str
+    service_type: str
+    association_level: str
+    chain: str
+    from_address: str
+    to_address: str
+    tx_hash: str
+    datetime_tw: str
+    asset: str
+    amount: str
+    label_basis: str
+    inquiry_value: str
+    limitations: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubpoenaCandidate:
+        valid_keys = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in data.items() if k in valid_keys})
+
+@dataclass
 class AnalysisResult:
     query: str
     network: str = "Polygon"
@@ -100,6 +125,8 @@ class AnalysisResult:
     evidence_records: list[dict[str, Any]] = field(default_factory=list)
     time_filter: dict[str, Any] = field(default_factory=dict)
     csv_index: dict[str, Any] = field(default_factory=dict)
+    subpoena_candidates: list[SubpoenaCandidate] = field(default_factory=list)
+    query_tracks: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add_evidence(self, name: str, source: str, data: Any) -> None:
         """保存本次分析取得的資料快照；雜湊於匯出證據包時產生。"""
@@ -125,12 +152,18 @@ class AnalysisResult:
             "evidence_records": list(self.evidence_records),
             "time_filter": dict(self.time_filter),
             "csv_index": dict(self.csv_index),
+            "subpoena_candidates": [c.to_dict() for c in self.subpoena_candidates],
+            "query_tracks": dict(self.query_tracks),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AnalysisResult:
         transfers = [Transfer.from_dict(t) if isinstance(t, dict) else t for t in data.get("transfers", [])]
         steps = [TraceStep.from_dict(s) if isinstance(s, dict) else s for s in data.get("steps", [])]
+        subpoena_candidates = [
+            SubpoenaCandidate.from_dict(c) if isinstance(c, dict) else c
+            for c in data.get("subpoena_candidates", [])
+        ]
         return cls(
             query=data.get("query", ""),
             network=data.get("network", "Polygon"),
@@ -143,6 +176,8 @@ class AnalysisResult:
             evidence_records=list(data.get("evidence_records", [])),
             time_filter=dict(data.get("time_filter", {})),
             csv_index=dict(data.get("csv_index", {})),
+            subpoena_candidates=subpoena_candidates,
+            query_tracks=dict(data.get("query_tracks", {})),
         )
 
 def timestamp_to_text(value: Any) -> str:
