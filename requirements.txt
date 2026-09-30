@@ -1,0 +1,2 @@
+# 執行工具不需第三方套件。
+# 若要封裝 Windows 執行檔：py -m pip install pyinstaller

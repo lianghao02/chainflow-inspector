@@ -1,0 +1,34 @@
+# Python 快取與測試暫存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 虛擬環境與建置輸出
+.venv/
+venv/
+env/
+build/
+dist/
+*.spec
+
+# 本機設定與敏感資料
+settings.json
+.env
+.env.*
+!.env.example
+
+# 查詢紀錄、案件輸出與使用者匯入資料
+history/
+reports/
+*.csv
+*.zip
+*.log
+
+# 作業系統與編輯器暫存
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
