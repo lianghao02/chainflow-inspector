@@ -278,7 +278,14 @@ async function handleStartTrace() {
     if (res.success && res.data) {
       currentResult = res.data;
       renderAllResults(res.data);
-      updateStatus('分析完成', false);
+      const resultStatus = res.data.analysis_status || 'complete';
+      if (resultStatus === 'partial') {
+        updateStatus('分析部分完成', false);
+      } else if (resultStatus === 'failed') {
+        updateStatus('核心資產軌道查詢失敗', false);
+      } else {
+        updateStatus('分析完成', false);
+      }
     } else {
       alert(`分析失敗：${res.error || '未知錯誤'}`);
       updateStatus('分析中斷或失敗', false);
@@ -311,11 +318,16 @@ function renderAllResults(data) {
   const tracks = data.query_tracks || {};
 
   // 1. 流程圖
+  flowGraph.filter = 'verified';
   flowGraph.setData(steps);
+  document.querySelectorAll('.pill-btn').forEach((button) => {
+    button.classList.toggle('active', button.getAttribute('data-filter') === 'verified');
+  });
 
-  // 2. 調證候選分流：可函調 KYC 服務商 vs 上游追查節點
-  const kycCandidates = subpoenas.filter((c) => c.inquiry_value === '可函調 KYC');
-  const upstreamCandidates = subpoenas.filter((c) => c.inquiry_value !== '可函調 KYC');
+  // 2. 調證候選分流：交易所／服務商函調候選 vs 上游追查節點
+  const actionableValues = new Set(['交易所提幣帳戶函調候選', '可函調 KYC']);
+  const kycCandidates = subpoenas.filter((c) => actionableValues.has(c.inquiry_value));
+  const upstreamCandidates = subpoenas.filter((c) => !actionableValues.has(c.inquiry_value));
 
   const bettingSteps = steps.filter((s) => s.direction === 'Polymarket 投注' || s.event_role === '投注買賣');
   const inboundSteps = steps.filter((s) => s.path_role === '入金');
@@ -348,6 +360,7 @@ function renderAllResults(data) {
 function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
   const kycEl = document.getElementById('sumKycCount');
   const principalEl = document.getElementById('sumPrincipalCount');
+  const principalLabelEl = document.getElementById('sumPrincipalLabel');
   const relayEl = document.getElementById('sumRelayCount');
   const upstreamEl = document.getElementById('sumUpstreamCount');
   const trackEl = document.getElementById('sumTrackStatus');
@@ -361,8 +374,12 @@ function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
     kycEl.classList.remove('highlight');
   }
 
-  const principalCount = steps.filter((s) => s.line_style === 'solid' && s.event_role !== '手續費供資' && s.path_role === '入金').length;
-  principalEl.textContent = `${principalCount} 條`;
+  const status = data.analysis_status || 'complete';
+  const isComplete = status === 'complete';
+  const principalCount = steps.filter((s) => s.line_style === 'solid' && s.pair_verified === true && s.event_role !== '手續費供資' && s.path_role === '入金').length;
+  const provisionalCount = steps.filter((s) => s.event_role !== '手續費供資' && s.path_role === '入金').length;
+  if (principalLabelEl) principalLabelEl.textContent = isComplete ? '⚡ 逐筆本金主線：' : '⚠️ 暫定資金事件：';
+  principalEl.textContent = `${isComplete ? principalCount : provisionalCount} ${isComplete ? '條' : '筆'}`;
 
   const relayCount = steps.filter((s) => s.path_category === '跨鏈橋／Relay' || Boolean(s.relay_request_id)).length;
   relayEl.textContent = `${relayCount} 段`;
@@ -370,16 +387,15 @@ function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
   upstreamEl.textContent = `${upstreamCandidates.length} 個`;
 
   const tracks = data.query_tracks || {};
-  const hasTruncated = Object.values(tracks).some((t) => t.is_truncated);
-  const hasError = Object.values(tracks).some((t) => t.status === 'error');
-  if (hasError) {
-    trackEl.textContent = '部分查詢異常';
+  const incomplete = data.incomplete_tracks || [];
+  if (status === 'failed') {
+    trackEl.textContent = `資料不完整（${incomplete.length} 項失敗）`;
     trackEl.style.color = '#f87171';
-  } else if (hasTruncated) {
-    trackEl.textContent = '4 軌已查（部分歷史達上限）';
+  } else if (status === 'partial') {
+    trackEl.textContent = `資料不完整（${incomplete.length} 項未完成）`;
     trackEl.style.color = '#fbbf24';
   } else {
-    trackEl.textContent = 'USDC/USDC.e/pUSD/USDT 完整';
+    trackEl.textContent = Object.keys(tracks).length ? '資料完整' : '未啟用核心資產軌道';
     trackEl.style.color = '#34d399';
   }
 }
@@ -405,18 +421,27 @@ function renderTrackBadges(tracks) {
     }
 
     if (t.status === 'error') {
-      statusEl.textContent = '查詢失敗';
+      statusEl.textContent = `查詢失敗 (${t.attempts || 0} 次)`;
       statusEl.className = 'track-badge-status err';
-    } else if (t.is_truncated) {
-      statusEl.textContent = `達上限 (${t.items_count}筆)`;
+    } else if (t.status === 'truncated' || t.is_truncated) {
+      statusEl.textContent = `歷史截斷 (${t.items_count}筆)`;
       statusEl.className = 'track-badge-status warn';
+    } else if (t.status === 'empty') {
+      statusEl.textContent = '無紀錄';
+      statusEl.className = 'track-badge-status ok';
     } else {
-      statusEl.textContent = `完成 (${t.items_count}筆)`;
+      statusEl.textContent = `正常完成 (${t.items_count}筆)`;
       statusEl.className = 'track-badge-status ok';
     }
 
-    if (subEl && t.min_block) {
-      subEl.textContent = `區塊 ${t.min_block}～${t.max_block}`;
+    if (subEl) {
+      if (t.status === 'error') {
+        subEl.textContent = t.error_message || '未取得錯誤原因';
+      } else if (t.min_block) {
+        subEl.textContent = `區塊 ${t.min_block}～${t.max_block}`;
+      } else {
+        subEl.textContent = `${t.pages_scanned || 0} 頁／${t.items_count || 0} 筆`;
+      }
     }
   });
 }
@@ -431,11 +456,11 @@ function selectDefaultPriorityStep(steps) {
   // 4. solid 入金線
   // 5. 第一筆
   const priorityStep =
-    steps.find((s) => s.path_category === '交易所直提' && s.line_style === 'solid') ||
-    steps.find((s) => s.classification === '交易所' && s.line_style === 'solid') ||
+    steps.find((s) => s.path_category === '交易所直提' && s.line_style === 'solid' && s.pair_verified === true) ||
+    steps.find((s) => s.classification === '交易所' && s.line_style === 'solid' && s.pair_verified === true) ||
     steps.find((s) => s.event_role === '手續費供資') ||
-    steps.find((s) => s.path_category === '跨鏈橋／Relay') ||
-    steps.find((s) => s.line_style === 'solid' && s.path_role === '入金') ||
+    steps.find((s) => s.path_category === '跨鏈橋／Relay' && s.pair_verified === true) ||
+    steps.find((s) => s.line_style === 'solid' && s.pair_verified === true && s.path_role === '入金') ||
     steps[0];
 
   if (priorityStep) {
@@ -502,7 +527,11 @@ function renderStepDetail(step) {
   kv7.val.style.fontSize = '11px';
   const d1 = createTextElement('div', `鏈別／區塊：${step.chain || 'Polygon'} ｜ 區塊 ${step.block_number || 'N/A'}`);
   const d2 = createTextElement('div', `資料來源：${step.evidence_source || 'Explorer 索引'}`);
-  const d3 = createTextElement('div', step.pair_verified ? '✅ 已唯一配對（逐筆本金）' : '⚠️ 資金池關聯或較早關聯（非逐筆）');
+  const globallyComplete = !currentResult || (currentResult.analysis_status || 'complete') === 'complete';
+  const verifiedText = globallyComplete
+    ? '✅ 已唯一配對（逐筆本金）'
+    : '⚠️ 單一步驟已配對；整體資料仍不完整，列為待驗證資金關聯';
+  const d3 = createTextElement('div', step.pair_verified ? verifiedText : '⚠️ 資金池關聯或較早關聯（非逐筆）');
   kv7.val.appendChild(d1);
   kv7.val.appendChild(d2);
   kv7.val.appendChild(d3);
@@ -798,8 +827,12 @@ function renderAuditTable(tracks) {
       stBadge = createTextElement('span', '查詢失敗', 'badge');
       stBadge.style.background = '#7f1d1d';
       stBadge.style.color = '#f87171';
-    } else if (t.is_truncated) {
+    } else if (t.status === 'truncated' || t.is_truncated) {
       stBadge = createTextElement('span', '已達上限 (歷史未完整)', 'badge badge-vasp');
+    } else if (t.status === 'empty') {
+      stBadge = createTextElement('span', '無紀錄', 'badge');
+      stBadge.style.background = '#1e3a5f';
+      stBadge.style.color = '#93c5fd';
     } else {
       stBadge = createTextElement('span', '正常完成', 'badge');
       stBadge.style.background = '#064e3b';
@@ -810,7 +843,8 @@ function renderAuditTable(tracks) {
     const tdPages = createTextElement('td', `${t.pages_scanned || 0} 頁 / ${t.items_count || 0} 筆`);
     const tdBlocks = createTextElement('td', t.min_block ? `區塊 ${t.min_block} ～ ${t.max_block}` : '無資料');
 
-    const tdErr = createTextElement('td', t.error_message || '—');
+    const attemptText = t.status === 'error' ? `嘗試 ${t.attempts || 0} 次；` : '';
+    const tdErr = createTextElement('td', `${attemptText}${t.error_message || '—'}`);
     tdErr.style.color = '#ef4444';
 
     tr.appendChild(tdSymbol);
@@ -832,6 +866,8 @@ function renderReportText(data) {
     `【Chain Fund Tracer 鏈上資金追蹤報告】`,
     `目標查詢：${data.query}`,
     `網路：${data.network || 'Polygon'}`,
+    `分析狀態：${data.analysis_status === 'partial' ? '部分完成' : data.analysis_status === 'failed' ? '失敗' : '完整'}`,
+    `未完成核心資產軌道：${(data.incomplete_tracks || []).join('、') || '無'}`,
     `--------------------------------------------------`,
     `【摘要結論】`,
     ...(data.summary || []).map((s) => `• ${s}`),
@@ -839,14 +875,14 @@ function renderReportText(data) {
     `【注意事項與法證邊界】`,
     ...(data.warnings || []).map((w) => `! ${w}`),
     ``,
-    `【可函調服務商清單】`,
+    `【交易所／服務商函調候選清單】`,
     ...(data.subpoena_candidates || [])
-      .filter((c) => c.inquiry_value === '可函調 KYC')
-      .map((c) => `[可函調 KYC] 服務商：${c.service_provider} ｜ 金額：${c.amount} ${c.asset} ｜ Tx：${c.tx_hash}`),
+      .filter((c) => ['交易所提幣帳戶函調候選', '可函調 KYC'].includes(c.inquiry_value))
+      .map((c) => `[${c.inquiry_value}] 服務商：${c.service_provider} ｜ 金額：${c.amount} ${c.asset} ｜ Tx：${c.tx_hash}`),
     ``,
     `【上游追蹤線索清單】`,
     ...(data.subpoena_candidates || [])
-      .filter((c) => c.inquiry_value !== '可函調 KYC')
+      .filter((c) => !['交易所提幣帳戶函調候選', '可函調 KYC'].includes(c.inquiry_value))
       .map((c) => `[${c.inquiry_value}] 節點：${c.service_provider} (${c.service_type}) ｜ 地址：${c.from_address} ｜ Tx：${c.tx_hash}`),
   ];
 

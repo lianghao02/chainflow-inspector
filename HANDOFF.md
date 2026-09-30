@@ -1,18 +1,56 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十三輪已完成 4 大法證與視覺化重大修復＋PyWebView js_api 私有屬性加固（排除 window/settings/provider 避免 pywebview 遞迴掃描 DOM 拋錯導致 API 初始化失敗，徹底解決 `run_analysis is not a function`）；全套 116 項測試 100% 通過。**
+> **第三十四輪已完成核心入金軌道逾時韌性與證據完整性分級：四軌可區分成功、無紀錄、截斷與失敗；不完整資料會同步降級摘要、函調候選、HTML 與匯出內容；流程圖預設只呈現查核主線。全套 126 項測試通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
-- **Baseline Commit SHA**：`745c053`
+- **Baseline Commit SHA**：`432ca57`
 - **Software Version**：`v1.4.3`（零地址法證嚴格排除、平行邊彩虹曲率展開、API 超時重試防護、投注解碼精準去重、PyWebView js_api 私有化加固徹底修復 run_analysis is not a function）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
 - **Task Type**：FIX / IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
+
+---
+
+## 第三十四輪完成工作：逾時韌性、證據完整性分級與圖譜收斂
+
+### 一、Explorer 查詢韌性
+
+1. `fetch_json()` 對 timeout、暫時性連線失敗、HTTP 408／429／5xx 最多嘗試三次，退避時間為 1 秒、2 秒。
+2. 每次失敗均保存錯誤歷程；`ProviderError` 同步攜帶 `attempts` 與 `retryable`。
+3. `Settings.explorer_fallback_urls` 提供明確設定式備援清冊；主端點三次失敗後，各備援端點僅嘗試一次。未設定可靠備援時不以 RPC 假裝完整歷史索引。
+4. 定向軌道保存 `status`、`attempts`、`retryable`、`pages_scanned`、`items_count`、`is_truncated`、`error_message`、`errors` 與實際 Explorer 端點。
+
+### 二、證據完整性與匯出降級
+
+1. `AnalysisResult` 新增 `analysis_status`（`complete`／`partial`／`failed`）與 `incomplete_tracks`。
+2. 任一核心資產軌道為 `error` 或 `truncated` 時，摘要及步驟備註中的「逐筆本金」會降級為「待驗證資金關聯」。
+3. 只有 `pair_verified=True` 且為實線之合格事件可列為逐筆本金；交易所公開標籤統一呈現為「交易所提幣帳戶函調候選」，不作自然人或本案賭金身分推定。
+4. TXT、CSV、JSON 快照與 ZIP manifest 均收錄整體分析狀態及未完成軌道。
+
+### 三、HTML 與圖譜
+
+1. 頂端區分「資料完整」與「資料不完整（N 項未完成）」；不完整時主線指標改為「暫定資金事件」。
+2. 底部狀態列依結果顯示「分析完成」、「分析部分完成」或核心軌道失敗。
+3. 四軌卡片與稽核表分別顯示正常完成、無紀錄、歷史截斷、查詢失敗；錯誤列呈現嘗試次數及最後原因。
+4. 圖譜預設為「查核主線」，只展開唯一配對本金、已驗證 Relay 與交易所函調候選；「全部金流」仍保留完整事件供人工檢視。
+
+### 四、驗證
+
+- 已在隔離 Codex Python 環境依 `requirements.txt` 補裝 `pywebview 5.4`，供完整測試使用，未修改使用者系統 Python。
+- `python -m unittest discover -s tests -v`：`Ran 126 tests ... OK`。
+- `python -m compileall -q chain_fund_tracer tests app.py`：通過。
+- 新增 `tests/test_query_integrity.py`，全程使用模擬回應，不依賴真實網路。
+
+### 五、仍受外部服務限制
+
+- Explorer 若持續逾時、限流或索引不完整，系統只能標示 `partial`／`failed`，不能補造不存在的歷史資料。
+- `explorer_fallback_urls` 預設留空；應由維運者填入已確認相容 Blockscout v2 API 的可靠端點。
+- 頁數上限仍是必要的等待時間防線；到達上限會明確標為 `truncated`，不再解讀為查詢完成或零筆。
 
 ---
 

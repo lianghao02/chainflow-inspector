@@ -8,7 +8,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .config import Settings
 from .relay_evidence import select_request
-class ProviderError(RuntimeError): pass
+
+
+class ProviderError(RuntimeError):
+    def __init__(self, message: str, *, attempts: int = 1, retryable: bool = False):
+        super().__init__(message)
+        self.attempts = attempts
+        self.retryable = retryable
 
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
@@ -78,42 +84,65 @@ def fetch_json(
     timeout: int = 25,
     headers: dict[str, str] | None = None,
     max_retries: int = 2,
+    request_audit: dict[str, Any] | None = None,
 ) -> Any:
     request_headers = {"Content-Type": "application/json", "User-Agent": "ChainFundTracer/0.2"}
     request_headers.update(headers or {})
     request_data = json.dumps(payload).encode("utf-8") if payload else None
 
     last_exc: Exception | None = None
+    audit = request_audit if request_audit is not None else {}
+    audit.update({"attempts": 0, "retryable": False, "error_message": "", "errors": []})
     for attempt in range(max_retries + 1):
+        audit["attempts"] = attempt + 1
         request = Request(url, data=request_data, headers=request_headers)
         try:
             with urlopen(request, timeout=timeout) as response:
+                audit["error_message"] = ""
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            if 400 <= exc.code < 500:
+            retryable = exc.code in (408, 429) or 500 <= exc.code < 600
+            audit["retryable"] = retryable
+            audit["errors"].append(f"第 {attempt + 1} 次：HTTP {exc.code}")
+            if not retryable:
                 try:
                     detail = json.loads(exc.read().decode("utf-8")).get("message", "")
                 except Exception:
                     detail = ""
                 hint = f"；{detail}" if detail else ""
-                raise ProviderError(f"公開資料服務回應 HTTP {exc.code}{hint}") from exc
+                message = f"公開資料服務回應 HTTP {exc.code}{hint}"
+                audit["error_message"] = message
+                raise ProviderError(message, attempts=attempt + 1, retryable=False) from exc
             last_exc = exc
+            audit["error_message"] = f"公開資料服務回應 HTTP {exc.code}"
             if attempt < max_retries:
-                time.sleep(1.0)
+                time.sleep(float(2 ** attempt))
                 continue
-            raise ProviderError(f"公開資料服務伺服器錯誤 HTTP {exc.code}") from exc
+            message = f"公開資料服務在 {attempt + 1} 次嘗試後仍回應 HTTP {exc.code}"
+            audit["error_message"] = message
+            raise ProviderError(message, attempts=attempt + 1, retryable=True) from exc
         except (URLError, TimeoutError, OSError) as exc:
             last_exc = exc
+            audit["retryable"] = True
+            audit["error_message"] = str(exc)
+            audit["errors"].append(f"第 {attempt + 1} 次：{exc}")
             if attempt < max_retries:
-                time.sleep(1.2)
+                time.sleep(float(2 ** attempt))
                 continue
             hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
-            raise ProviderError(f"無法取得公開鏈上資料：{exc}{hint}") from exc
+            message = f"已重試 {attempt + 1} 次後仍無法取得公開鏈上資料：{exc}{hint}"
+            audit["error_message"] = message
+            raise ProviderError(message, attempts=attempt + 1, retryable=True) from exc
         except Exception as exc:
             hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
-            raise ProviderError(f"無法取得公開鏈上資料：{exc}{hint}") from exc
+            message = f"無法取得公開鏈上資料：{exc}{hint}"
+            audit["error_message"] = message
+            audit["errors"].append(f"第 {attempt + 1} 次：{exc}")
+            raise ProviderError(message, attempts=attempt + 1, retryable=False) from exc
 
-    raise ProviderError(f"公開鏈上資料請求逾時或連線失敗：{last_exc}")
+    message = f"公開鏈上資料請求逾時或連線失敗：{last_exc}"
+    audit["error_message"] = message
+    raise ProviderError(message, attempts=max_retries + 1, retryable=True)
 class PolygonProvider:
     _serializable = False
     def __init__(self, settings: Settings):
@@ -124,6 +153,11 @@ class PolygonProvider:
         self.token_history_max_block: int | None = None
         self.last_scanned_pages = 0
         self.targeted_track_audit: dict[str, dict[str, Any]] = {}
+        self.last_request_attempts = 0
+        self.last_request_retryable = False
+        self.last_request_error_message = ""
+        self.last_explorer_url = ""
+        self.last_request_errors: list[str] = []
     def rpc(self, method: str, params: list[Any]) -> Any:
         self._rpc_id += 1
         payload = {"jsonrpc":"2.0","id":self._rpc_id,"method":method,"params":params}
@@ -420,7 +454,8 @@ class PolygonProvider:
     ) -> list[dict[str, Any]]:
         """讀取 Explorer 已索引的 ERC-20 轉帳；支援指定區塊高度範圍、代幣合約與方向（to/from）。"""
         limit_pages = max_pages if max_pages is not None else getattr(self.settings, "max_history_pages", 15)
-        base = f"{self.settings.blockscout_url.rstrip('/')}/addresses/{address}/token-transfers"
+        explorer_urls = [self.settings.blockscout_url, *getattr(self.settings, "explorer_fallback_urls", [])]
+        explorer_urls = list(dict.fromkeys(url.rstrip("/") for url in explorer_urls if str(url).strip()))
         params: dict[str, Any] = {"type": "ERC-20", "items_count": 50}
         if end_block is not None:
             params["block_number"] = end_block
@@ -435,12 +470,49 @@ class PolygonProvider:
         self.token_history_min_block: int | None = None
         self.token_history_max_block: int | None = None
         self.last_scanned_pages = 0
+        self.last_request_attempts = 0
+        self.last_request_retryable = False
+        self.last_request_error_message = ""
+        self.last_explorer_url = explorer_urls[0] if explorer_urls else ""
+        self.last_request_errors = []
 
         seen_blocks: list[int] = []
+        active_endpoint = 0
 
         for _ in range(limit_pages):
             self.last_scanned_pages += 1
-            data = fetch_json(f"{base}?{urlencode(params)}")
+            data: dict[str, Any] | None = None
+            last_error: ProviderError | None = None
+            for endpoint_index in range(active_endpoint, len(explorer_urls)):
+                base = f"{explorer_urls[endpoint_index]}/addresses/{address}/token-transfers"
+                request_audit: dict[str, Any] = {}
+                try:
+                    data = fetch_json(
+                        f"{base}?{urlencode(params)}",
+                        max_retries=2 if endpoint_index == 0 else 0,
+                        request_audit=request_audit,
+                    )
+                    self.last_request_attempts += int(request_audit.get("attempts", 1))
+                    self.last_request_errors.extend(str(item) for item in request_audit.get("errors", []))
+                    self.last_request_retryable = bool(request_audit.get("retryable", False))
+                    self.last_request_error_message = ""
+                    self.last_explorer_url = explorer_urls[endpoint_index]
+                    active_endpoint = endpoint_index
+                    break
+                except ProviderError as exc:
+                    self.last_request_attempts += int(request_audit.get("attempts", exc.attempts))
+                    self.last_request_errors.extend(str(item) for item in request_audit.get("errors", []))
+                    self.last_request_retryable = exc.retryable
+                    self.last_request_error_message = str(exc)
+                    last_error = exc
+            if data is None:
+                if last_error is None:
+                    raise ProviderError("未設定可用的 Explorer 歷史索引端點", attempts=0, retryable=False)
+                raise ProviderError(
+                    self.last_request_error_message,
+                    attempts=self.last_request_attempts,
+                    retryable=self.last_request_retryable,
+                ) from last_error
             items = data.get("items", [])
             self.token_history_scanned_count += len(items)
             for item in items:
@@ -526,13 +598,17 @@ class PolygonProvider:
                 self.targeted_track_audit[tok_norm] = {
                     "token": tok,
                     "symbol": sym,
-                    "status": "truncated" if self.token_history_truncated else "success",
+                    "status": "truncated" if self.token_history_truncated else ("success" if tok_events else "empty"),
+                    "attempts": self.last_request_attempts,
+                    "retryable": self.last_request_retryable,
                     "pages_scanned": self.last_scanned_pages,
                     "items_count": len(tok_events),
                     "min_block": self.token_history_min_block,
                     "max_block": self.token_history_max_block,
                     "is_truncated": self.token_history_truncated,
                     "error_message": "",
+                    "explorer_url": self.last_explorer_url,
+                    "errors": list(self.last_request_errors),
                 }
                 for ev in tok_events:
                     tx_h = str(ev.get("transaction_hash") or ev.get("tx_hash") or ev.get("hash") or "").lower()
@@ -542,16 +618,22 @@ class PolygonProvider:
                         seen_keys.add(key)
                         all_events.append(ev)
             except Exception as exc:
+                attempts = int(getattr(exc, "attempts", getattr(self, "last_request_attempts", 0)))
+                retryable = bool(getattr(exc, "retryable", getattr(self, "last_request_retryable", False)))
                 self.targeted_track_audit[tok_norm] = {
                     "token": tok,
                     "symbol": sym,
                     "status": "error",
+                    "attempts": attempts,
+                    "retryable": retryable,
                     "pages_scanned": getattr(self, "last_scanned_pages", 0),
                     "items_count": 0,
                     "min_block": None,
                     "max_block": None,
                     "is_truncated": False,
                     "error_message": str(exc),
+                    "explorer_url": getattr(self, "last_explorer_url", ""),
+                    "errors": list(getattr(self, "last_request_errors", [])),
                 }
 
         return all_events

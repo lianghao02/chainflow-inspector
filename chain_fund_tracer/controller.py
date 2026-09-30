@@ -194,7 +194,12 @@ class Controller:
             # 儲存至本機歷史記錄
             save_history_entry(result, mode=mode)
 
-            on_progress("分析完成，正在呈現結果…")
+            status_text = {
+                "complete": "分析完成，正在呈現結果…",
+                "partial": "分析部分完成，正在呈現可驗證結果…",
+                "failed": "核心資產軌道查詢失敗，正在呈現錯誤與已取得資料…",
+            }.get(result.analysis_status, "分析完成，正在呈現結果…")
+            on_progress(status_text)
             return {
                 "success": True,
                 "data": result.to_dict(),
@@ -351,4 +356,3 @@ class Controller:
         path_part = "transaction" if cid == 728126428 and itype == "tx" else ("tx" if itype == "tx" else "address")
         safe_url = f"{base}/{path_part}/{val}"
         return self.open_external(safe_url)
-

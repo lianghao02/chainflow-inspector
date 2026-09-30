@@ -12,7 +12,7 @@ class FlowGraph {
     this.svg = svgElement;
     this.onSelect = onSelectCallback || (() => {});
     this.steps = [];
-    this.filter = 'all'; // 'all' | 'principal' | 'relay' | 'pool' | 'internal' | 'outflow'
+    this.filter = 'verified'; // 'verified' | 'all' | 'principal' | 'relay' | 'pool' | 'internal' | 'outflow'
 
     // ViewBox 與平移縮放狀態
     this.viewBox = { x: 0, y: 0, w: 1100, h: 600 };
@@ -123,8 +123,14 @@ class FlowGraph {
     const cat = step.path_category || '';
     const style = step.line_style || 'solid';
 
+    if (this.filter === 'verified') {
+      const verifiedPrincipal = style === 'solid' && step.pair_verified === true && step.event_role !== '手續費供資';
+      const verifiedRelay = cat === '跨鏈橋／Relay' && step.pair_verified === true;
+      const exchangeCandidate = cat === '交易所直提' || step.classification === '交易所' || step.classification === 'VASP';
+      return verifiedPrincipal || verifiedRelay || exchangeCandidate;
+    }
     if (this.filter === 'principal') {
-      return style === 'solid' && step.event_role !== '手續費供資';
+      return style === 'solid' && step.pair_verified === true && step.event_role !== '手續費供資';
     }
     if (this.filter === 'relay') {
       return cat === '跨鏈橋／Relay' || Boolean(step.relay_request_id);

@@ -14,6 +14,10 @@ from .explanations import explain_step, plain_summary
 from .svg_exporter import export_svg
 def export_text(result: AnalysisResult, path: str) -> None:
     lines = [f"{PRODUCT_NAME}查核紀錄", PRODUCT_SUBTITLE, "="*36, f"查詢輸入：{result.query}", f"網路：{result.network}"]
+    status_labels = {"complete": "完整", "partial": "部分完成", "failed": "失敗"}
+    lines.append(f"分析狀態：{status_labels.get(result.analysis_status, result.analysis_status)}")
+    if result.incomplete_tracks:
+        lines.append(f"未完成核心資產軌道：{'、'.join(result.incomplete_tracks)}")
     if result.time_filter and result.time_filter.get("cutoff_text"):
         lines.append(f"歷史時間錨定：{result.time_filter.get('cutoff_text')}（截止區塊：{result.time_filter.get('end_block')}）")
     if getattr(result, "csv_index", None) and result.csv_index.get("file_name"):
@@ -34,7 +38,9 @@ def export_csv(result: AnalysisResult, path: str) -> None:
     time_filter = getattr(result, "time_filter", {}) or {}
     cutoff_str = time_filter.get("cutoff_text", "")
     end_block_str = str(time_filter.get("end_block", "")) if time_filter.get("end_block") else ""
-    names = [field.name for field in fields(TraceStep)] + ["explanation", "time_filter_cutoff", "time_filter_block"]
+    names = [field.name for field in fields(TraceStep)] + [
+        "explanation", "time_filter_cutoff", "time_filter_block", "analysis_status", "incomplete_tracks"
+    ]
     with Path(path).open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=names)
         writer.writeheader()
@@ -45,6 +51,8 @@ def export_csv(result: AnalysisResult, path: str) -> None:
             row["explanation"] = explain_step(step).text()
             row["time_filter_cutoff"] = cutoff_str
             row["time_filter_block"] = end_block_str
+            row["analysis_status"] = result.analysis_status
+            row["incomplete_tracks"] = "、".join(result.incomplete_tracks)
             # 不信任外部標籤；避免試算表將來源文字解讀為公式。
             for key, value in row.items():
                 if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
@@ -104,6 +112,8 @@ def export_evidence_package(result: AnalysisResult, path: str) -> None:
             "query": result.query,
             "time_filter": result.time_filter or {},
             "csv_index": getattr(result, "csv_index", {}) or {},
+            "analysis_status": result.analysis_status,
+            "incomplete_tracks": list(result.incomplete_tracks),
             "notice": "本清冊的 SHA-256 用於檢查匯出後檔案完整性，不是數位簽章或自然人身分認定。",
             "files": [
                 {

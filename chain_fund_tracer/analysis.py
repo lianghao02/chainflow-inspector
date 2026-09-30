@@ -192,10 +192,10 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
             service_type = "中心化交易所"
 
             if step.event_role == "手續費供資":
-                inquiry_value = "可函調 KYC"
+                inquiry_value = "交易所提幣帳戶函調候選"
                 limitations = "交易所燃料手續費出金；非逐筆下注本金，但為該個人錢包開戶／手續費出資來源，可向交易所調取該筆提幣帳戶 KYC。"
             elif step.line_style == "solid":
-                inquiry_value = "可函調 KYC"
+                inquiry_value = "交易所提幣帳戶函調候選"
                 limitations = "交易所出金熱錢包；金額與時間核對吻合，需向交易所調取該筆提幣 UID、登入 IP 與 KYC 身分。"
             else:
                 inquiry_value = "僅供上游追蹤"
@@ -233,7 +233,11 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
         else:
             continue
 
-        association_level = "逐筆本金" if (step.line_style == "solid" and step.event_role in ("補款", "底層資產投入", "轉帳", "跨鏈橋入金")) else "資金池關聯"
+        association_level = "逐筆本金" if (
+            step.line_style == "solid"
+            and step.pair_verified
+            and step.event_role in ("補款", "底層資產投入", "轉帳", "跨鏈橋入金")
+        ) else "資金池關聯"
         if step.line_style in ("dashed", "dotted") or step.event_role == "手續費供資":
             association_level = "輔助線索"
 
@@ -255,7 +259,7 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
         seen_keys.add(key)
         candidates.append(candidate)
 
-    order = {"可函調 KYC": 0, "僅供上游追蹤": 1, "不可作 KYC 終點": 2}
+    order = {"交易所提幣帳戶函調候選": 0, "可函調 KYC": 0, "僅供上游追蹤": 1, "不可作 KYC 終點": 2}
     candidates.sort(key=lambda c: (order.get(c.inquiry_value, 3), -event_timestamp(c.datetime_tw)))
     return candidates
 
@@ -279,11 +283,21 @@ class Analyzer:
         tracks = dict(getattr(self.provider, "targeted_track_audit", {}))
         if tracks:
             result.query_tracks = tracks
+            incomplete = [
+                str(info.get("symbol") or tok)
+                for tok, info in tracks.items()
+                if info.get("status") in {"error", "truncated"} or info.get("is_truncated")
+            ]
+            error_count = sum(1 for info in tracks.values() if info.get("status") == "error")
+            result.incomplete_tracks = incomplete
+            result.analysis_status = "failed" if error_count == len(tracks) else ("partial" if incomplete else "complete")
             for tok, info in tracks.items():
                 sym = info.get("symbol", "代幣")
                 if info.get("status") == "error":
+                    attempts = info.get("attempts", 0)
                     result.warnings.append(
-                        f"定向入金檢索【{sym}】查詢失敗：{info.get('error_message')}；該幣別可能遺漏早前補款。"
+                        f"定向入金檢索【{sym}】查詢失敗（共嘗試 {attempts} 次）：{info.get('error_message')}；"
+                        "該幣別可能遺漏早前補款。"
                     )
                 elif info.get("is_truncated"):
                     pages = info.get("pages_scanned", 0)
@@ -292,7 +306,28 @@ class Analyzer:
                         f"定向入金檢索【{sym}】已達單次上限（已掃描 {pages} 頁共 {count} 筆），此幣別歷史記錄尚未完整；未命中不代表沒有更早的入金。"
                     )
 
+        if result.analysis_status != "complete":
+            replacement = "待驗證資金關聯"
+            result.summary = [
+                text.replace("逐筆本金主線", replacement).replace("逐筆本金", replacement)
+                for text in result.summary
+            ]
+            for step in result.steps:
+                step.notes = step.notes.replace("逐筆本金主線", replacement).replace("逐筆本金", replacement)
+            result.warnings.append(
+                f"本次分析資料不完整（未完成軌道：{'、'.join(result.incomplete_tracks) or '待確認'}）；"
+                "所有本金歸屬結論均降級為待驗證資金關聯。"
+            )
+
         result.subpoena_candidates = build_subpoena_candidates(result)
+        if result.analysis_status != "complete":
+            for candidate in result.subpoena_candidates:
+                if candidate.association_level == "逐筆本金":
+                    candidate.association_level = "待驗證資金關聯"
+                candidate.limitations = (
+                    f"資料不完整（未完成軌道：{'、'.join(result.incomplete_tracks) or '待確認'}）；"
+                    f"{candidate.limitations}"
+                )
         result.warnings = list(dict.fromkeys(result.warnings))
         result.sources = list(dict.fromkeys(result.sources))
         return result
@@ -837,6 +872,7 @@ class Analyzer:
         principal_vasp = [
             step for step in result.steps
             if step.path_role == "入金" and step.line_style == "solid"
+            and step.pair_verified
             and step.classification in {"交易所", "入金服務商", "VASP"}
             and step.event_role != "手續費供資"
         ]

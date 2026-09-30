@@ -103,13 +103,13 @@ class TestPhase1AndPhase2(unittest.TestCase):
             "地址入金", 1, "0xbinance_tx", "2024-05-15 10:00:00", "USDC", "5000",
             "0xbinance_addr", "0xtarget", "0xbinance_addr",
             "交易所", "Binance 14", "Explorer", "高度可能", "僅資金關聯",
-            path_category="交易所直提", line_style="solid", event_role="補款",
+            path_category="交易所直提", line_style="solid", event_role="補款", pair_verified=True,
         )
         s_moonpay = TraceStep(
             "地址入金", 1, "0xmoonpay_tx", "2024-05-15 11:00:00", "USDC", "200",
             "0xmoonpay_addr", "0xtarget", "0xmoonpay_addr",
             "入金服務商", "MoonPay", "Explorer", "高度可能", "僅資金關聯",
-            path_category="法幣／信用卡入金服務商", line_style="solid", event_role="補款",
+            path_category="法幣／信用卡入金服務商", line_style="solid", event_role="補款", pair_verified=True,
         )
         s_internal = TraceStep(
             "Polymarket 投注", 0, "0xbet_tx", "2024-05-15 12:00:00", "pUSD", "50",
@@ -123,10 +123,10 @@ class TestPhase1AndPhase2(unittest.TestCase):
 
         # 內部回款應被排除，剩下 2 筆
         self.assertEqual(len(candidates), 2)
-        # 且兩者皆為「可函調 KYC」
-        for c in candidates:
-            self.assertEqual(c.inquiry_value, "可函調 KYC")
-            self.assertEqual(c.association_level, "逐筆本金")
+        by_provider = {candidate.service_provider: candidate for candidate in candidates}
+        self.assertEqual(by_provider["Binance"].inquiry_value, "交易所提幣帳戶函調候選")
+        self.assertEqual(by_provider["MoonPay"].inquiry_value, "可函調 KYC")
+        self.assertTrue(all(c.association_level == "逐筆本金" for c in candidates))
 
     def test_controller_initialization_and_settings(self):
         ctrl = Controller()
@@ -172,7 +172,7 @@ class TestPhase1AndPhase2(unittest.TestCase):
         cands = build_subpoena_candidates(res)
         self.assertEqual(len(cands), 1)
         self.assertEqual(cands[0].service_provider, "OKX")
-        self.assertEqual(cands[0].inquiry_value, "可函調 KYC")
+        self.assertEqual(cands[0].inquiry_value, "交易所提幣帳戶函調候選")
         self.assertEqual(cands[0].association_level, "輔助線索")
         self.assertIn("手續費出資來源", cands[0].limitations)
 
@@ -235,7 +235,7 @@ class TestPhase1AndPhase2(unittest.TestCase):
         cands = build_subpoena_candidates(res)
         self.assertEqual(len(cands), 2)
         binance_cand = next(c for c in cands if c.service_provider == "Binance")
-        self.assertEqual(binance_cand.inquiry_value, "可函調 KYC")
+        self.assertEqual(binance_cand.inquiry_value, "交易所提幣帳戶函調候選")
         self.assertEqual(binance_cand.association_level, "逐筆本金")
 
     def test_inspect_initial_gas_funder_earliest_block_sort(self):
@@ -319,4 +319,3 @@ class TestPhase1AndPhase2(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

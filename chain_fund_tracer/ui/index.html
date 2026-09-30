@@ -42,11 +42,11 @@
     </div>
     <div class="summary-metrics">
       <div class="summary-pill">
-        <span class="summary-pill-label">🏛️ 可函調 KYC 服務商：</span>
+        <span class="summary-pill-label">🏛️ 交易所／服務商函調候選：</span>
         <span class="summary-pill-value highlight" id="sumKycCount">尚未查詢</span>
       </div>
       <div class="summary-pill">
-        <span class="summary-pill-label">⚡ 逐筆本金主線：</span>
+        <span class="summary-pill-label" id="sumPrincipalLabel">⚡ 逐筆本金主線：</span>
         <span class="summary-pill-value" id="sumPrincipalCount">—</span>
       </div>
       <div class="summary-pill">
@@ -146,8 +146,9 @@
     <div class="center-pane">
       <div class="graph-toolbar">
         <div class="filter-pills">
-          <button class="pill-btn active" data-filter="all">全部金流</button>
-          <button class="pill-btn" data-filter="principal">⚡ 本金主線 (實線)</button>
+          <button class="pill-btn active" data-filter="verified">查核主線</button>
+          <button class="pill-btn" data-filter="all">全部金流</button>
+          <button class="pill-btn" data-filter="principal">⚡ 唯一配對本金</button>
           <button class="pill-btn" data-filter="relay">🌉 跨鏈／Relay</button>
           <button class="pill-btn" data-filter="pool">💧 資金池關聯 (虛線)</button>
           <button class="pill-btn" data-filter="internal">🎯 平台內部／下注</button>

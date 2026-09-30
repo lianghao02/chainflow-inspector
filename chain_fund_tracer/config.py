@@ -8,6 +8,7 @@ class Settings:
     _serializable = False
     rpc_url: str = "https://polygon.drpc.org"
     blockscout_url: str = "https://polygon.blockscout.com/api/v2"
+    explorer_fallback_urls: list[str] = field(default_factory=list)
     etherscan_api_key: str = ""
     relay_api_key: str = ""
     orbscan_api_url: str = "https://data-api.polymarket.com/trades"
