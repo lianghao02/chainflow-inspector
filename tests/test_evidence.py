@@ -348,6 +348,9 @@ class ObjectiveLanguageAndSameChainRelayTests(unittest.TestCase):
         okx_tx = "0x2da43321d1943e9f67206b18ee33112c9ca2a7e377104710a292f44e0905a43b"
 
         mock_provider = Mock(spec=PolygonProvider)
+        from chain_fund_tracer.models import DataAvailability
+        mock_provider.query_transactions_with_status.return_value = ([], DataAvailability("transactions", True, "NoResults"))
+        mock_provider.query_internal_transactions_with_status.return_value = ([], DataAvailability("internal_transactions", True, "NoResults"))
         mock_provider.settings = Settings()
         mock_provider.token_history_truncated = False
         mock_provider.receipt.return_value = {

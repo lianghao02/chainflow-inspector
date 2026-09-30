@@ -1,18 +1,65 @@
 # HANDOFF
 
-> **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十六輪已完成涉案賭客 4+1 大資金行為畫像自動判定、出金變現交易所雙向調證與乾淨總結卡片：自動判定新手直充型、官網跨鏈型、獲利出金退場型、幣圈囤幣（非託管）型與平台內部結算型；雙向打通入金出資與出金變現交易所調證（函調 UID、登入 IP、KYC 與提領法幣帳戶）；工作台頂部新增精緻直觀、零雜亂的涉案賭客行為畫像與調證總結卡片，並提供歷史資料受限時的 CSV 秒載解決處方。全案 132 項測試 100% 通過。**
+## 目前狀態
+可交付；2026-09-30 Codex 已完成最終驗收。
 
-## 核心元資料
+## 本輪目標
+完成 v1.6.0 資料採集器、交易診斷及 Agent 分析包的基線測試、5 地址端到端驗收與本機提交。
 
-- **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
-- **Branch**：`main`
-- **Baseline Commit SHA**：`6a9bb5a`
-- **Software Version**：`v1.5.0`（涉案賭客 4+1 大資金行為畫像自動判定、出金變現交易所雙向調證、乾淨總結卡片、歷史受限處方）
-- **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
-- **Task Type**：FIX / IMPROVE / RELEASE
-- **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
-- **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
+## 已完成
+- 保留前輪 FlowEvent、DataAvailability、採集診斷、指定交易診斷及 Agent 分析包功能。
+- 真實地址驗收重現「採集轉帳存在，但 token_transfers.json 為空」：分析包改匯出採集到的轉帳 FlowEvent，並核對清冊筆數。
+- 統一主鏈與內部交易查詢審計；分頁上限標示 IncompletePagination，失敗時保存已取得紀錄。
+- Etherscan 備援檢查回覆狀態，錯誤不能當作 NoResults，切換索引從第一頁重新採集並逐頁查詢。
+- 查詢完整性同步至 analysis_status／incomplete_tracks；未採集合約日誌標示 UnsupportedProvider。
+- 修正 HTTP 非重試錯誤分支的未定義 message，保留代幣歷史查詢 error_type。
+- 新增 6 項回歸測試；補齊既有 Relay 測試替身的新採集介面，保留原斷言。
+- 驗收產物保存於本次 Codex 工作目錄 outputs，未加入版本庫。
+
+## 刻意未修改
+- 保留既有 Transfer、TraceStep、追蹤演算法及啟發式畫像相容介面。
+- 未更換 GUI、未新增正式產品相依套件、未推送或發布。
+- 測試套件僅安裝於本次 Codex 工作目錄 work/python-deps。
+
+## 尚未完成
+本輪範圍無；遠端推送不在本次授權範圍。
+
+## 驗證結果
+### 已執行
+- 修正前基線 unittest：31 項通過。
+- 修正後 pytest 全套：142 passed、6 subtests passed（97.96 秒）；最後摘要／診斷計數調整後，相關核心測試再驗證 37 passed、6 subtests passed（6.53 秒）。本次未重現前輪 Tcl/Tk 失敗。
+- 全專案 Python 靜態語法檢查：34 個檔案通過。
+- Controller 初始化及 agent_bundle 匯出分支：PASS，實際 ZIP 含 10 檔。
+- Codex 內建 Browser 開啟本機工作台並操作匯出選單：新選項可見，console error／warning 為空。
+- 5 個真實地址各產生 ZIP，驗證 CRC、10 檔清單、目標地址、資料清冊與實際筆數一致；摘要包含 SHA-256。
+- git diff --check 通過；變更敏感資料掃描無警訊。
+
+| 地址 | 主鏈交易 | 代幣轉帳 | 內部交易 | 整體狀態 |
+|---|---:|---:|---:|---|
+| `0xA6C82064a9649c720F745A86d5fB2C06075c3488` | 0 | 5 | 0 | complete |
+| `0x5A2409487d0a03ecbE444c8784b0EFc371477d0D` | 0 | 9 | 0 | complete |
+| `0xFbAFe46E6275Bb6e559488dB0efC4D8A6E67869d` | 0 | 6 | 0 | complete |
+| `0x89e122ce705d2234c01a78126CBbCC836c32B640` | 0 | 21 | 0 | complete |
+| `0x1e313b649B6932C3c3c73b89fF9254b2989A594B` | 116 | 602 | 0 | partial |
+
+### 尚未驗證
+- 原生 WebView2 視窗與系統存檔對話框未做人工操作；Controller 存檔分支以測試視窗替身驗證，前端則透過內建 Browser 實測。
+- 新電腦／Portable 發布驗證不在本輪範圍。
+
+### 已知風險
+- 第 5 地址有歷史分頁截斷，分析包明確標示 partial／IncompletePagination；不能解讀為完整歷史。
+- 公開端點可能回報限流、逾時或服務不可用；可用性與實際採集時間須隨附判讀。
+- 分析包未取得合約日誌時標示 UnsupportedProvider，不能解讀為零筆事件。
+
+## Git 狀態
+- Commit：本文件所屬本機提交（以 git log -1 查核）。
+- Push：否。
+- Working Tree：提交前僅本輪明列檔案；提交後以 git status 查核。
+- Branch：main。
+- Baseline：60f3420。
+
+## 下一步
+使用保存的 Agent 分析包進行後續研判；第 5 地址需補充歷史分頁資料才可作完整性結論。
 
 ---
 

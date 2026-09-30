@@ -25,6 +25,7 @@
       <div class="dropdown">
         <button type="button" class="primary" id="exportDropdownBtn">📥 匯出法證文件 ▾</button>
         <div class="dropdown-menu" id="exportDropdownMenu">
+          <button type="button" class="dropdown-item" data-export="agent_bundle" style="color:#38bdf8; font-weight:600;">🤖 匯出 Agent 分析包 ZIP (推薦)</button>
           <button type="button" class="dropdown-item" data-export="zip">📦 完整證據包 ZIP (含 SHA-256)</button>
           <button type="button" class="dropdown-item" data-export="subpoena_csv">⚖️ 函調候選清單 CSV</button>
           <button type="button" class="dropdown-item" data-export="csv">📊 追蹤步驟清冊 CSV</button>
@@ -70,6 +71,7 @@
       <div class="profile-badge-row">
         <span class="profile-badge" id="profBadge">【涉案賭客資金畫像分析中】</span>
         <span class="rating-badge" id="profRating">🎯 破案機會：評估中</span>
+        <span style="font-size: 11px; color: var(--text-muted); margin-left: auto;">⚙️ 啟發式初步線索（請以 Agent 分析包深度研判為準）</span>
       </div>
       <div class="profile-behavior-desc" id="profBehavior">
         正在分析鏈上流向與交易所出入金特性…

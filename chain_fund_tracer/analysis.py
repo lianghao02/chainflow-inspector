@@ -4,8 +4,10 @@ from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
-from .models import AnalysisResult, SubpoenaCandidate, TraceStep, Transfer, timestamp_to_text
-from .providers import PolygonProvider, ProviderError
+from .models import AnalysisResult, DataAvailability, FlowEvent, SubpoenaCandidate, TraceStep, Transfer, timestamp_to_text
+from .providers import (
+    PolygonProvider, ProviderError, raw_internal_to_flow_event, raw_transfer_to_flow_event, raw_tx_to_flow_event
+)
 from .relay_evidence import amount_text, exact_pair, explorer_url, same_chain_request_match
 ADDRESS = re.compile(r"^0x[a-fA-F0-9]{40}$")
 TX_HASH = re.compile(r"^0x[a-fA-F0-9]{64}$")
@@ -539,6 +541,13 @@ class Analyzer:
                         f"定向入金檢索【{sym}】已達單次上限（已掃描 {pages} 頁共 {count} 筆），此幣別歷史記錄尚未完整；未命中不代表沒有更早的入金。"
                     )
 
+        for query_type, info in result.availabilities.items():
+            if not info.available or not info.is_complete:
+                result.incomplete_tracks.append(query_type)
+        result.incomplete_tracks = list(dict.fromkeys(result.incomplete_tracks))
+        if result.incomplete_tracks and result.analysis_status == "complete":
+            result.analysis_status = "partial"
+
         if result.analysis_status != "complete":
             replacement = "待驗證資金關聯"
             result.summary = [
@@ -565,24 +574,26 @@ class Analyzer:
         profile = determine_suspect_profile(result)
         result.suspect_profile = profile
 
-        if not any("【涉案賭客資金畫像】" in line for line in result.summary):
-            lead_lines = [
-                f"【涉案賭客資金畫像】{profile['portrait_title']}（破案機會：{profile['breakthrough_rating']}）",
-                f"• 行為特徵：{profile['behavior_summary']}",
-                f"• 📥 入金出資線索：{profile['inbound_exchange']}",
-                f"• 📤 出金變現線索：{profile['outbound_exchange']}",
-                f"• ⚖️ 核心調證對象：{profile['subpoena_target']}（調取：{profile['subpoena_items']}）",
-                f"• 🔍 偵查破口處方：{profile['investigation_lead']}",
-                f"• ⚠️ 法律與技術邊界：{profile['limitations']}",
+        # 將涉案賭客 4+1 畫像標記為 DEPRECATE 啟發式參考，不再霸佔報告主文，改以客觀鏈上採集總結為主
+        if not any("【鏈上採集總結】" in line for line in result.summary):
+            tx_count = len(result.transactions)
+            tr_count = sum(e.event_type == "token_transfer" for e in result.flow_events) or len(result.transfers)
+            itx_count = len(getattr(result, "internal_transactions", []))
+            flow_count = len(getattr(result, "flow_events", []))
+            collector_lines = [
+                f"【鏈上採集總結】目標：{result.query}｜網路：{result.network}｜狀態：{result.analysis_status}",
+                f"• 數據審計：主鏈交易 {tx_count} 筆、代幣轉帳 {tr_count} 筆、內部交易 {itx_count} 筆（FlowEvents 合計 {flow_count or (tx_count + tr_count)} 筆）",
+                f"• 初步線索：{len(result.subpoena_candidates)} 個調證候選節點；啟發式初步參考：{profile.get('portrait_title', '未分類')}",
+                "• 🤖 深度資金路徑推理、跨鏈穿透與交易所帳號定論，建議匯出「Agent 分析包」交由 Agent 分析。",
             ]
             if profile.get("history_solution"):
-                lead_lines.append(f"• ⏱️ 歷史資料受限處方：{profile['history_solution']}")
+                collector_lines.append(f"• ⏱️ 歷史資料受限處方：{profile['history_solution']}")
 
             if result.summary:
-                for idx, line in enumerate(lead_lines, start=1):
+                for idx, line in enumerate(collector_lines, start=0):
                     result.summary.insert(idx, line)
             else:
-                result.summary.extend(lead_lines)
+                result.summary.extend(collector_lines)
 
         result.warnings = list(dict.fromkeys(result.warnings))
         result.sources = list(dict.fromkeys(result.sources))
@@ -910,12 +921,13 @@ class Analyzer:
                 else:
                     history = self.provider.address_token_transfers(address)
             except ProviderError as exc:
-                raise ProviderError(f"無法取得此地址的 Token Transfers：{exc}") from exc
+                raise ProviderError(f"無法取得此地址的 Token Transfers：{exc}", error_type=exc.error_type) from exc
 
             # 保存一般歷史查詢的覆蓋範圍。後續每種代幣的定向查詢會更新
             # Provider 的暫存統計，不可讓它覆寫本次一般查詢的稽核資料。
             history_truncated = getattr(self.provider, "token_history_truncated", False)
             scanned_count = getattr(self.provider, "token_history_scanned_count", len(history))
+            history_pages = getattr(self.provider, "last_scanned_pages", 0)
             min_block = getattr(self.provider, "token_history_min_block", None)
             max_block = getattr(self.provider, "token_history_max_block", None)
 
@@ -957,9 +969,71 @@ class Analyzer:
                 except Exception as exc:
                     result.warnings.append(f"RPC Logs 深度打撈失敗：{exc}")
 
+            # 1. 採集主鏈交易 (Normal Transactions)
+            try:
+                txs, tx_avail = self.provider.query_transactions_with_status(address, max_pages=3)
+                result.transactions = txs
+                result.availabilities["transactions"] = tx_avail
+                for tx in txs:
+                    result.flow_events.append(raw_tx_to_flow_event(tx, chain_id=137, source_provider=tx_avail.provider))
+                result.add_diagnostic_log(f"主鏈交易查詢：{tx_avail.status}，取得 {len(txs)} 筆（已翻 {tx_avail.pages_scanned} 頁）")
+            except Exception as exc:
+                result.availabilities["transactions"] = DataAvailability(
+                    query_type="transactions", available=False, status="ProviderUnavailable", error_message=str(exc)
+                )
+                result.add_diagnostic_log(f"主鏈交易查詢失敗：{exc}")
+
+            # 2. 採集內部交易 (Internal Transactions)
+            try:
+                itxs, itx_avail = self.provider.query_internal_transactions_with_status(address, max_pages=2)
+                result.internal_transactions = itxs
+                result.availabilities["internal_transactions"] = itx_avail
+                for itx in itxs:
+                    result.flow_events.append(raw_internal_to_flow_event(itx, chain_id=137, source_provider=itx_avail.provider))
+                result.add_diagnostic_log(f"內部交易查詢：{itx_avail.status}，取得 {len(itxs)} 筆")
+            except Exception as exc:
+                result.availabilities["internal_transactions"] = DataAvailability(
+                    query_type="internal_transactions", available=False, status="UnsupportedProvider", error_message=str(exc)
+                )
+
+            # 3. 整合 Token Transfers 到 FlowEvents 與可用性
+            tr_status = "IncompletePagination" if history_truncated else ("Success" if history else "NoResults")
+            tr_avail = DataAvailability(
+                query_type="token_transfers",
+                available=True,
+                status=tr_status,
+                record_count=len(history),
+                pages_scanned=history_pages,
+                is_complete=not history_truncated,
+                provider="Blockscout"
+            )
+            result.availabilities["token_transfers"] = tr_avail
+            for h in history:
+                result.flow_events.append(raw_transfer_to_flow_event(h, chain_id=137, source_provider="Blockscout"))
+            result.add_diagnostic_log(f"代幣轉帳查詢：{tr_status}，取得 {len(history)} 筆原始記錄")
+
             result.add_evidence("polygon_address_token_transfers", f"Explorer Token Transfers：{address}", history)
             redemption_hashes = self._redemption_tx_hashes(history, address)
-            all_candidates = self._funding_candidates(history, address, cutoff)
+            filter_stats: dict[str, int] = {}
+            all_candidates = self._funding_candidates(history, address, cutoff, filter_stats=filter_stats)
+            result.diagnostic_stats = {
+                "raw_token_transfers": len(history),
+                "parsed_records": len(history),
+                "normalized_records": sum(e.event_type == "token_transfer" for e in result.flow_events),
+                "normalized_all_flow_events": len(result.flow_events),
+                "filter_rejected": {
+                    "wrong_token": filter_stats.get("wrong_token", 0),
+                    "outside_time_range": filter_stats.get("outside_time_range", 0),
+                    "not_recipient": filter_stats.get("not_recipient", 0),
+                },
+                "candidates_count": len(all_candidates),
+            }
+            result.add_diagnostic_log(
+                f"Diagnostic Pipeline: Raw {len(history)} -> Normalized {result.diagnostic_stats['normalized_records']} -> "
+                f"Rejected {filter_stats.get('wrong_token', 0) + filter_stats.get('outside_time_range', 0) + filter_stats.get('not_recipient', 0)} "
+                f"(wrong_token={filter_stats.get('wrong_token', 0)}, outside_time={filter_stats.get('outside_time_range', 0)}) -> "
+                f"Candidates {len(all_candidates)}"
+            )
             prioritized_candidates = self._prioritize_candidates(all_candidates)
             candidates = [item for item in prioritized_candidates if normalize(item["hash"]) not in redemption_hashes][:20]
 
@@ -1210,15 +1284,31 @@ class Analyzer:
 
         return sorted(items, key=_cand_prio)
 
-    def _funding_candidates(self, events: list[dict[str, Any]], recipient: str, cutoff: float) -> list[dict[str, str]]:
+    def _funding_candidates(
+        self, events: list[dict[str, Any]], recipient: str, cutoff: float,
+        filter_stats: dict[str, int] | None = None
+    ) -> list[dict[str, str]]:
         found = []
         core_tokens = getattr(self.provider.settings, "core_inbound_tokens", [PUSD, USDC, USDC_E, USDT])
         valid_contracts = {normalize(t) for t in core_tokens} | {PUSD, USDC, USDC_E, USDT}
+        if filter_stats is not None:
+            filter_stats.setdefault("not_recipient", 0)
+            filter_stats.setdefault("wrong_token", 0)
+            filter_stats.setdefault("outside_time_range", 0)
+            filter_stats.setdefault("accepted", 0)
         for event in events:
             token_data = event.get("token", {}) or {}; contract = normalize(token_data.get("address") or token_data.get("address_hash") or event.get("token_address", ""))
             sender, target = event_address(event.get("from")), event_address(event.get("to")); when = event.get("timestamp", event.get("timeStamp", ""))
-            if normalize(target) != normalize(recipient) or contract not in valid_contracts: continue
-            if cutoff and event_timestamp(when) >= cutoff: continue
+            if normalize(target) != normalize(recipient):
+                if filter_stats is not None: filter_stats["not_recipient"] += 1
+                continue
+            if contract not in valid_contracts:
+                if filter_stats is not None: filter_stats["wrong_token"] += 1
+                continue
+            if cutoff and event_timestamp(when) >= cutoff:
+                if filter_stats is not None: filter_stats["outside_time_range"] += 1
+                continue
+            if filter_stats is not None: filter_stats["accepted"] += 1
             amount_raw = event.get("total", {}).get("value", "") if isinstance(event.get("total"), dict) else event.get("value", "")
             decimals = int(token_data.get("decimals", 6) or 6); amount = f"{int(str(amount_raw) or '0') / 10**decimals:.6f}" if str(amount_raw).isdigit() else str(amount_raw)
             token = "pUSD" if contract == PUSD else ("USDC.e" if contract == USDC_E else ("USDT" if contract == USDT else "USDC"))
@@ -2364,3 +2454,57 @@ class Analyzer:
                     steps.append(TraceStep(direction, hop, tx.get("hash", ""), timestamp_to_text(timestamp) if timestamp else "", "原生幣／請再查 Logs", str(amount), sender, recipient, related, kind, label, source, confidence, "僅資金關聯" if kind != "未知地址" else "未知", notes))
                     if hop < max_hops: queue.append((related, hop + 1))
         return steps
+
+    def diagnose_tx(self, tx_hash: str) -> dict[str, Any]:
+        """指定 Tx Hash 診斷能力（第十一階段）：
+        定位某筆交易在 Provider Raw -> Parser -> Normalized -> Filter 哪一層消失。
+        """
+        tx_hash_clean = tx_hash.strip().lower()
+        diag: dict[str, Any] = {
+            "tx_hash": tx_hash_clean,
+            "provider_raw": "NOT FOUND",
+            "parser": "PENDING",
+            "normalized": "PENDING",
+            "filter": "PENDING",
+            "reason": "",
+            "details": {},
+        }
+        try:
+            tx = self.provider.transaction(tx_hash_clean)
+            if not tx:
+                diag["provider_raw"] = "NOT FOUND"
+                diag["reason"] = "RPC eth_getTransactionByHash 未回傳此交易（可能尚未被索引、已被 Reorg，或非 Polygon 鏈交易）"
+                return diag
+            diag["provider_raw"] = "FOUND"
+            receipt = self.provider.receipt(tx_hash_clean) or {}
+            status_hex = receipt.get("status")
+            diag["details"]["block_number"] = hex_int(tx.get("blockNumber"))
+            diag["details"]["tx_status"] = "Success" if status_hex == "0x1" else "Failed/Reverted"
+
+            # Parser 檢驗
+            timestamp = timestamp_to_text(self.provider.block_timestamp(tx.get("blockNumber", "0x0")))
+            transfers = self._parse_receipt(tx_hash_clean, receipt, timestamp)
+            diag["details"]["transfers_count"] = len(transfers)
+            diag["details"]["logs_count"] = len(receipt.get("logs", []))
+            diag["parser"] = "PASS" if transfers or receipt.get("logs") else "NO_LOGS"
+
+            # Normalized 檢驗
+            core_tokens = getattr(self.provider.settings, "core_inbound_tokens", [PUSD, USDC, USDC_E, USDT])
+            valid_contracts = {normalize(t) for t in core_tokens} | {PUSD, USDC, USDC_E, USDT}
+            matching_transfers = [t for t in transfers if normalize(t.token_contract) in valid_contracts]
+            if matching_transfers:
+                diag["normalized"] = "PASS"
+                diag["details"]["matched_core_tokens"] = [t.token for t in matching_transfers]
+            else:
+                diag["normalized"] = "EXCLUDED_TOKEN"
+                diag["reason"] = f"交易包含 {len(transfers)} 筆轉帳 Logs，但合約均非核心儲備代幣 (USDC/USDT/pUSD)"
+                return diag
+
+            # Filter 檢驗
+            diag["filter"] = "PASS"
+            diag["reason"] = "交易在原始 Receipt、解析與正規化均通過，可供 Agent 分析"
+            return diag
+        except Exception as exc:
+            diag["provider_raw"] = "QUERY_FAILED"
+            diag["reason"] = f"查詢異常：{exc}"
+            return diag

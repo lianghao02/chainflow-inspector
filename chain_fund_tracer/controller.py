@@ -15,7 +15,7 @@ from .analysis import Analyzer
 from .branding import PRODUCT_NAME
 from .config import Settings
 from .csv_loader import inspect_and_load_polygonscan_csv
-from .exporters import export_csv, export_evidence_package, export_subpoena_csv, export_svg, export_text
+from .exporters import export_agent_bundle, export_csv, export_evidence_package, export_subpoena_csv, export_svg, export_text
 from .history import delete_history_entry, list_history_entries, load_history_entry, save_history_entry
 from .models import AnalysisResult
 from .providers import PolygonProvider, ProviderError
@@ -263,6 +263,7 @@ class Controller:
             "svg": (f"資金路徑圖_{query_slug}_{date_str}.svg", ("向量圖形 (*.svg)",)),
             "subpoena_csv": (f"函調候選清單_{query_slug}_{date_str}.csv", ("CSV 檔案 (*.csv)",)),
             "zip": (f"法證證據包_{query_slug}_{date_str}.zip", ("ZIP 壓縮檔 (*.zip)",)),
+            "agent_bundle": (f"agent_analysis_bundle_{query_slug}_{date_str}.zip", ("Agent 分析包 (*.zip)",)),
         }
 
         if export_type not in configs:
@@ -290,6 +291,8 @@ class Controller:
                 export_subpoena_csv(self._current_result, dest)
             elif export_type == "zip":
                 export_evidence_package(self._current_result, dest)
+            elif export_type == "agent_bundle":
+                export_agent_bundle(self._current_result, dest)
             return {"success": True, "file_path": dest}
         except Exception as exc:
             return {"success": False, "error": f"匯出失敗：{exc}"}

@@ -113,6 +113,52 @@ class SubpoenaCandidate:
         return cls(**{k: v for k, v in data.items() if k in valid_keys})
 
 @dataclass
+class FlowEvent:
+    chain_id: int
+    block_number: int
+    timestamp: str
+    tx_hash: str
+    from_address: str
+    to_address: str
+    event_type: str  # "transaction", "token_transfer", "internal", "trace", "log"
+    token_address: str = ""
+    token_symbol: str = ""
+    amount: str = ""
+    contract_address: str = ""
+    source_provider: str = ""
+    raw_reference: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FlowEvent:
+        valid_keys = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in data.items() if k in valid_keys})
+
+
+@dataclass
+class DataAvailability:
+    query_type: str
+    available: bool
+    status: str  # "Success", "NoResults", "ProviderUnavailable", "RateLimited", "Timeout", "RpcError", "ParseError", "IncompletePagination", "UnsupportedChain", "UnsupportedProvider"
+    record_count: int = 0
+    pages_scanned: int = 0
+    is_complete: bool = True
+    provider: str = ""
+    error_message: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DataAvailability:
+        valid_keys = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in data.items() if k in valid_keys})
+
+
+@dataclass
 class AnalysisResult:
     query: str
     network: str = "Polygon"
@@ -130,6 +176,12 @@ class AnalysisResult:
     analysis_status: str = "complete"
     incomplete_tracks: list[str] = field(default_factory=list)
     suspect_profile: dict[str, Any] = field(default_factory=dict)
+    flow_events: list[FlowEvent] = field(default_factory=list)
+    availabilities: dict[str, DataAvailability] = field(default_factory=dict)
+    internal_transactions: list[dict[str, Any]] = field(default_factory=list)
+    contract_logs: list[dict[str, Any]] = field(default_factory=list)
+    diagnostic_logs: list[str] = field(default_factory=list)
+    diagnostic_stats: dict[str, Any] = field(default_factory=dict)
 
     def add_evidence(self, name: str, source: str, data: Any) -> None:
         """保存本次分析取得的資料快照；雜湊於匯出證據包時產生。"""
@@ -141,6 +193,11 @@ class AnalysisResult:
             "acquired_at": datetime.now(timezone.utc).isoformat(),
             "data": data,
         })
+
+    def add_diagnostic_log(self, message: str) -> None:
+        """添加帶時間戳的結構化診斷訊息。"""
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self.diagnostic_logs.append(f"[{ts} UTC] {message}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -160,6 +217,12 @@ class AnalysisResult:
             "analysis_status": self.analysis_status,
             "incomplete_tracks": list(self.incomplete_tracks),
             "suspect_profile": dict(self.suspect_profile),
+            "flow_events": [e.to_dict() for e in self.flow_events],
+            "availabilities": {k: v.to_dict() for k, v in self.availabilities.items()},
+            "internal_transactions": list(self.internal_transactions),
+            "contract_logs": list(self.contract_logs),
+            "diagnostic_logs": list(self.diagnostic_logs),
+            "diagnostic_stats": dict(self.diagnostic_stats),
         }
 
     @classmethod
@@ -170,6 +233,11 @@ class AnalysisResult:
             SubpoenaCandidate.from_dict(c) if isinstance(c, dict) else c
             for c in data.get("subpoena_candidates", [])
         ]
+        flow_events = [FlowEvent.from_dict(e) if isinstance(e, dict) else e for e in data.get("flow_events", [])]
+        availabilities = {
+            k: DataAvailability.from_dict(v) if isinstance(v, dict) else v
+            for k, v in data.get("availabilities", {}).items()
+        }
         return cls(
             query=data.get("query", ""),
             network=data.get("network", "Polygon"),
@@ -187,6 +255,12 @@ class AnalysisResult:
             analysis_status=str(data.get("analysis_status", "complete")),
             incomplete_tracks=list(data.get("incomplete_tracks", [])),
             suspect_profile=dict(data.get("suspect_profile", {})),
+            flow_events=flow_events,
+            availabilities=availabilities,
+            internal_transactions=list(data.get("internal_transactions", [])),
+            contract_logs=list(data.get("contract_logs", [])),
+            diagnostic_logs=list(data.get("diagnostic_logs", [])),
+            diagnostic_stats=dict(data.get("diagnostic_stats", {})),
         )
 
 def timestamp_to_text(value: Any) -> str:

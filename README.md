@@ -1,22 +1,37 @@
-# 鏈流查核｜ChainFlow Inspector
+# 鏈流查核｜ChainFlow Inspector (Blockchain Evidence Collector)
 
-> **目前版本**：`v1.4.0`（2026-09-30）
+> **目前版本**：`v1.6.0`（2026-09-30）
+> **核心定位**：**Blockchain Evidence Collector + Diagnostic Tool + Agent Analysis Bundle Exporter**
 
-**公開鏈上資金關聯分析工具。**供臺灣警務案件的公開鏈上資料初步分析使用。工具透過公開 RPC、Blockscout API 與使用者自行維護的公開地址標籤查詢資料；支援匯入 PolygonScan Token Transfers CSV 作為歷史索引，不使用網頁爬蟲，也不內建 API 金鑰。採用 PyWebView 搭配本機 HTML/CSS/原生 JS 現代化法證工作台（支援可互動 SVG 圖譜與 5 大資料頁籤），並保留 Tkinter 作為無 WebView 環境下的自動備援。
+本工具定位為法證等級的**鏈上證據蒐集器與診斷工具**，供執法人員與分析師取得可靠、客觀、可重現的公開鏈上原始資料與標準化金流事件（FlowEvents）。
+
+本工具堅持「程式與 Agent 職責分離」原則：
+- **程式負責（固化、可重現、零偏誤）**：公開 RPC / Explorer 資料可靠取得、分頁防漏、異常狀態精準分類（拒絕將錯誤偽裝成 0 筆）、資料標準化（去重、Decimal 轉換、時區正規化）、診斷管線審計與原始證據打包。
+- **Agent 負責（語境理解、複雜推理）**：深度跨鏈跳轉分析、意圖協議與 Bridge 解碼、交易所出入金實名破口研判。可一鍵匯出標準 **Agent Analysis Bundle (ZIP)** 直接交由 Antigravity、Codex 或 ChatGPT 進行深度研判。
 
 > **法律與證據界線：** 地址分類、資金關聯與交易所標籤，不是自然人身分、實際控制權或違法事實的認定。交易所 KYC、IP 與帳戶控制資料，仍須依正式法定程序調取並由承辦人員核實。
 
-## 功能
+## 核心能力
 
-- 輸入 Polygon `Tx Hash` 或 EVM `Wallet Address`。
-- 「Polymarket／Relay 資金鏈」模式：可輸入**下注 Tx Hash**或 **Polymarket 錢包地址**。Tx Hash 模式會列出同筆批次撮合內全部 pUSD 扣款候選；地址模式會從近期 pUSD／USDC 入金自動反查鑄造、Relay 與來源鏈。
-- **支援歷史 CSV 索引離線穿透**：高頻交易或歷史久遠地址（超出公開 Explorer 一般索引查詢範圍者），可匯入 PolygonScan 匯出的 Token Transfers CSV 作為候選索引；工具依「使用者提供之歷史索引 ＋ Polygon RPC 鏈上即時核實」原則，由鏈上 Receipt 解碼底層 USDC.e 出資人與 Relay 跨鏈來源，突破公開 API 深度限制。
-- **法證入金 7 大路徑分類**：自動將入金關聯劃分為「交易所直提」、「跨鏈橋／Relay」、「法幣／信用卡入金服務商」、「DEX 兌換」、「外部錢包轉入」、「Polymarket 平台內部回款／贖回」與「未能分類」。
-- **個人錢包自動向上遞迴（Recursive Upstream Tracing）**：入金若遇到非託管個人錢包（EOA），不再於第一跳停步，自動沿本金鏈向上追查 2～5 跳，直到命中中心化交易所（Binance、OKX、MAX 等）或達跳數上限。
-- **初始手續費開戶出資來源（Initial POL Gas）自動穿透**：自動檢索個人錢包歷史最早之原生 POL 燃料轉入；若來自交易所熱錢包，自動在圖譜建立點線供資關聯，並提煉至「函調候選清單」標註為 `[可函調 KYC] (手續費開戶出資來源)`。
-- **函調候選清單（Subpoena Candidates）提煉**：逐筆提煉可向執法機關發函調取之具體對象，自動標註「可函調 KYC」、「僅供上游追蹤」或「不可作 KYC 終點」，並提供法定限制與資金池混合警示，支援一鍵匯出 `subpoena_candidates.csv`。
-- **核心儲備代幣軌道透明稽核**：定向檢索 USDC、USDC.e、pUSD、USDT，公開記錄檢索狀態、頁數、筆數、起訖區塊；若觸及單次上限強制揭露「歷史未完整」警示，拒絕靜默略過。
-- **可互動現代化 HTML 工作台**：整合 SVG 資金流程圖（支援 Pan/Zoom、視角重設、主線/跨鏈/出金多維度過濾）、三欄佈局、狀態燈號與底部五大資料抽屜（投注解碼、入金路徑、函調清單、查詢軌道、法證報告）。
+1. **多維鏈上資料採集（Evidence Collection）**：
+   - 完整支援主鏈交易（Normal Transactions）、代幣轉帳（ERC-20 Token Transfers）、內部交易（Internal Transactions）與合約事件日誌。
+   - 嚴格分離「成功查詢（0 筆結果）」與「查詢失敗（HTTP 429 RateLimited、Timeout、RPC 異常、分頁未完）」，拒絕將端點限制偽裝為無金流。
+
+2. **統一金流模型（FlowEvents）**：
+   - 多來源標準化匯流為統一事件模型（Chain ID、區塊高度、時間戳、交易雜湊、發送/接收地址、事件類型、代幣合約、標準金額、原始參照）。
+
+3. **採集診斷管線（Diagnostic Pipeline）**：
+   - 結構化記錄 `Raw API Records` → `Parsed` → `Normalized` → `Rejected (附拒絕原因：wrong token, outside time window 等)` → `Candidates`。
+   - 支援指定 Tx Hash 診斷，快速定位特定交易在採集與過濾哪一層被排除。
+
+4. **Agent Analysis Bundle 匯出**：
+   - 一鍵匯出包含 `PROMPT.txt`、`summary.json`（含完整 Data Availability 清冊）、`transactions.json`、`token_transfers.json`、`internal_transactions.json`、`traces_and_logs.json`、`labels.json`、`contracts.json` 與 `diagnostic.log` 的標準壓縮包。
+
+5. **歷史 CSV 索引離線穿透**：
+   - 支援匯入 PolygonScan 匯出的完整 CSV 索引，搭配本機 RPC 即時核實，突破公共 API 單次翻頁限制。
+
+6. **可互動現代化法證工作台（PyWebView）**：
+   - 提供直觀 SVG 資金圖譜、調證候選清單、狀態看板與匯出選單，並支援離線與無 WebView 環境下的備援。
 - pUSD 批次鑄造會以目標收款地址、金額與 Log 順序配對底層 USDC；若同筆交易仍有多筆同額來源，顯示「歸屬待確認／關聯不足」並停止向上串接，避免把其他錢包補款列為目標來源。
 - 若目的鏈補款命中 Relay 公開索引，自動還原來源鏈、來源資產、原始入金者、Relay 收款合約及來源鏈 Tx Hash；追蹤深度 4～5 跳時再續查來源鏈上游與交易所公開標籤。來源為 TRON 時，會以 Tronscan 公開 TRC-20 紀錄續追並保留公開標籤。
 - 解析交易基本資料與 Receipt 內 ERC-20 Transfer；提示 Polymarket Conditional Tokens 的 ERC-1155 相關事件。

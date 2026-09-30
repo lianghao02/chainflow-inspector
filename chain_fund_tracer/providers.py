@@ -7,14 +7,16 @@ from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .config import Settings
+from .models import DataAvailability, FlowEvent
 from .relay_evidence import select_request
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, attempts: int = 1, retryable: bool = False):
+    def __init__(self, message: str, *, attempts: int = 1, retryable: bool = False, error_type: str = "ProviderUnavailable"):
         super().__init__(message)
         self.attempts = attempts
         self.retryable = retryable
+        self.error_type = error_type
 
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
@@ -112,7 +114,8 @@ def fetch_json(
                 hint = f"；{detail}" if detail else ""
                 message = f"公開資料服務回應 HTTP {exc.code}{hint}"
                 audit["error_message"] = message
-                raise ProviderError(message, attempts=attempt + 1, retryable=False) from exc
+                err_type = "RateLimited" if exc.code == 429 else ("Timeout" if exc.code in (408, 504) else "ProviderUnavailable")
+                raise ProviderError(message, attempts=attempt + 1, retryable=False, error_type=err_type) from exc
             last_exc = exc
             audit["error_message"] = f"公開資料服務回應 HTTP {exc.code}"
             if attempt < max_retries:
@@ -120,7 +123,8 @@ def fetch_json(
                 continue
             message = f"公開資料服務在 {attempt + 1} 次嘗試後仍回應 HTTP {exc.code}"
             audit["error_message"] = message
-            raise ProviderError(message, attempts=attempt + 1, retryable=True) from exc
+            err_type = "RateLimited" if exc.code == 429 else ("Timeout" if exc.code in (408, 504) else "ProviderUnavailable")
+            raise ProviderError(message, attempts=attempt + 1, retryable=True, error_type=err_type) from exc
         except (URLError, TimeoutError, OSError) as exc:
             last_exc = exc
             audit["retryable"] = True
@@ -132,17 +136,19 @@ def fetch_json(
             hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
             message = f"已重試 {attempt + 1} 次後仍無法取得公開鏈上資料：{exc}{hint}"
             audit["error_message"] = message
-            raise ProviderError(message, attempts=attempt + 1, retryable=True) from exc
+            err_type = "Timeout" if isinstance(exc, TimeoutError) or "timed out" in str(exc).lower() else "ProviderUnavailable"
+            raise ProviderError(message, attempts=attempt + 1, retryable=True, error_type=err_type) from exc
         except Exception as exc:
             hint = "；目前端點拒絕未授權請求，請在「設定」更換 Polygon RPC URL。" if "401" in str(exc) else ""
             message = f"無法取得公開鏈上資料：{exc}{hint}"
             audit["error_message"] = message
             audit["errors"].append(f"第 {attempt + 1} 次：{exc}")
-            raise ProviderError(message, attempts=attempt + 1, retryable=False) from exc
+            raise ProviderError(message, attempts=attempt + 1, retryable=False, error_type="ParseError" if isinstance(exc, json.JSONDecodeError) else "ProviderUnavailable") from exc
 
     message = f"公開鏈上資料請求逾時或連線失敗：{last_exc}"
     audit["error_message"] = message
-    raise ProviderError(message, attempts=max_retries + 1, retryable=True)
+    err_type = "Timeout" if isinstance(last_exc, TimeoutError) or "timed out" in str(last_exc).lower() else "ProviderUnavailable"
+    raise ProviderError(message, attempts=max_retries + 1, retryable=True, error_type=err_type)
 class PolygonProvider:
     _serializable = False
     def __init__(self, settings: Settings):
@@ -516,7 +522,7 @@ class PolygonProvider:
         limit_pages = max_pages if max_pages is not None else getattr(self.settings, "max_history_pages", 15)
         explorer_urls = [self.settings.blockscout_url, *getattr(self.settings, "explorer_fallback_urls", [])]
         explorer_urls = list(dict.fromkeys(url.rstrip("/") for url in explorer_urls if str(url).strip()))
-        
+
         # 注意：Blockscout v2 之 block_number 係游標參數需搭配 index，初次查詢不傳遞 block_number
         params: dict[str, Any] = {"type": "ERC-20", "items_count": 50}
         if token:
@@ -544,7 +550,7 @@ class PolygonProvider:
             self.last_scanned_pages += 1
             data: dict[str, Any] | None = None
             last_error: ProviderError | None = None
-            
+
             for endpoint_index in range(active_endpoint, len(explorer_urls)):
                 base = f"{explorer_urls[endpoint_index]}/addresses/{address}/token-transfers"
                 request_audit: dict[str, Any] = {}
@@ -611,6 +617,7 @@ class PolygonProvider:
                     self.last_request_error_message or str(last_error),
                     attempts=self.last_request_attempts,
                     retryable=self.last_request_retryable,
+                    error_type=last_error.error_type,
                 ) from last_error
 
             items = data.get("items", [])
@@ -1003,3 +1010,180 @@ class PolygonProvider:
                 "block_number": item.get("block_number"),
             })
         return output
+
+    def query_transactions_with_status(
+        self, address: str, max_pages: int = 5
+    ) -> tuple[list[dict[str, Any]], DataAvailability]:
+        return self._query_history_with_status(address, "transactions", "txlist", max_pages)
+
+    def query_internal_transactions_with_status(
+        self, address: str, max_pages: int = 5
+    ) -> tuple[list[dict[str, Any]], DataAvailability]:
+        return self._query_history_with_status(address, "internal_transactions", "txlistinternal", max_pages)
+
+    def _query_history_with_status(
+        self, address: str, query_type: str, action: str, max_pages: int
+    ) -> tuple[list[dict[str, Any]], DataAvailability]:
+        """保留已取得紀錄；錯誤回覆與分頁截斷不得標示為完整或零筆。"""
+        if max_pages < 1:
+            raise ValueError("max_pages 必須大於零")
+        items: list[dict[str, Any]] = []
+        pages_scanned = 0
+        provider = "Blockscout"
+        params: dict[str, Any] = {}
+        endpoint = query_type.replace("_", "-")
+
+        def availability(status: str, complete: bool, error: str = "") -> DataAvailability:
+            return DataAvailability(
+                query_type=query_type, available=not error, status=status,
+                record_count=len(items), pages_scanned=pages_scanned,
+                is_complete=complete, provider=provider, error_message=error,
+            )
+
+        for _ in range(max_pages):
+            pages_scanned += 1
+            url = f"{self.settings.blockscout_url.rstrip('/')}/addresses/{address.lower()}/{endpoint}"
+            if params:
+                url += "?" + urlencode(params)
+            try:
+                data = fetch_json(url)
+                if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                    raise ProviderError("Explorer 回覆缺少 items 清單", error_type="ParseError")
+                batch = data["items"]
+                if any(not isinstance(item, dict) for item in batch):
+                    raise ProviderError("Explorer 紀錄格式不符", error_type="ParseError")
+                cursor = data.get("next_page_params")
+                if cursor is not None and not isinstance(cursor, dict):
+                    raise ProviderError("Explorer 分頁游標格式不符", error_type="ParseError")
+                items.extend(batch)
+                if not cursor:
+                    return items, availability("Success" if items else "NoResults", True)
+                params = cursor
+            except ProviderError as exc:
+                if not getattr(self.settings, "etherscan_api_key", ""):
+                    return items, availability(exc.error_type, False, str(exc))
+                # 切換索引時從第一頁重新採集，避免混用不同 Provider 的游標。
+                provider = "Etherscan"
+                etherscan_items: list[dict[str, Any]] = []
+                offset = min(max(self.settings.page_size, 1), 50)
+                try:
+                    for page in range(1, max_pages + 1):
+                        query = urlencode({
+                            "chainid": 137, "module": "account", "action": action,
+                            "address": address.lower(), "sort": "desc", "page": page,
+                            "offset": offset, "apikey": self.settings.etherscan_api_key,
+                        })
+                        pages_scanned += 1
+                        data = fetch_json(f"https://api.etherscan.io/v2/api?{query}")
+                        if not isinstance(data, dict):
+                            raise ProviderError("Etherscan 回覆格式不符", error_type="ParseError")
+                        batch = data.get("result")
+                        empty = str(data.get("status")) == "0" and data.get("message") == "No transactions found" and batch == []
+                        if not empty and str(data.get("status")) != "1":
+                            text = str(batch).lower()
+                            kind = "RateLimited" if "rate limit" in text else "ProviderUnavailable"
+                            raise ProviderError("Etherscan 回報查詢失敗", error_type=kind)
+                        if not isinstance(batch, list) or any(not isinstance(item, dict) for item in batch):
+                            raise ProviderError("Etherscan 回覆缺少交易清單", error_type="ParseError")
+                        etherscan_items.extend(batch)
+                        if len(batch) < offset:
+                            items = etherscan_items
+                            return items, availability("Success" if items else "NoResults", True)
+                    items = etherscan_items
+                    return items, availability("IncompletePagination", False)
+                except ProviderError as fallback_error:
+                    if etherscan_items:
+                        items = etherscan_items
+                    else:
+                        provider = "Blockscout"
+                    return items, availability(fallback_error.error_type, False, "Explorer 與 Etherscan 備援均未完成查詢")
+        return items, availability("IncompletePagination", False)
+
+
+def raw_tx_to_flow_event(tx: dict[str, Any], chain_id: int = 137, source_provider: str = "Blockscout") -> FlowEvent:
+    tx_hash = str(tx.get("hash") or tx.get("transaction_hash") or "")
+    from_addr = str(tx.get("from", {}).get("hash") if isinstance(tx.get("from"), dict) else tx.get("from") or tx.get("fromAddress") or "")
+    to_addr = str(tx.get("to", {}).get("hash") if isinstance(tx.get("to"), dict) else tx.get("to") or tx.get("toAddress") or "")
+    blk_num = int(tx.get("blockNumber") or tx.get("block_number") or 0) if str(tx.get("blockNumber") or tx.get("block_number") or "").isdigit() else 0
+    ts = str(tx.get("timestamp") or tx.get("timeStamp") or "")
+    val = str(tx.get("value") or "0")
+    if val.isdigit() and int(val) > 0:
+        amount_native = f"{int(val) / 10**18:.6f}"
+    else:
+        amount_native = val
+    native_symbol = "POL" if chain_id == 137 else ("BNB" if chain_id == 56 else "ETH")
+    return FlowEvent(
+        chain_id=chain_id,
+        block_number=blk_num,
+        timestamp=ts,
+        tx_hash=tx_hash,
+        from_address=from_addr.lower(),
+        to_address=to_addr.lower(),
+        event_type="transaction",
+        token_address="0x0000000000000000000000000000000000000000",
+        token_symbol=native_symbol,
+        amount=amount_native,
+        contract_address=to_addr.lower() if tx.get("to") else "",
+        source_provider=source_provider,
+        raw_reference=tx,
+    )
+
+
+def raw_transfer_to_flow_event(tr: dict[str, Any], chain_id: int = 137, source_provider: str = "Blockscout") -> FlowEvent:
+    tx_hash = str(tr.get("transaction_hash") or tr.get("tx_hash") or tr.get("hash") or "")
+    from_addr = str(tr.get("from", {}).get("hash") if isinstance(tr.get("from"), dict) else tr.get("from") or tr.get("fromAddress") or "")
+    to_addr = str(tr.get("to", {}).get("hash") if isinstance(tr.get("to"), dict) else tr.get("to") or tr.get("toAddress") or "")
+    tok_obj = tr.get("token") if isinstance(tr.get("token"), dict) else {}
+    tok_addr = str(tok_obj.get("address") or tr.get("token_contract") or tr.get("contractAddress") or tr.get("contract_address") or "").lower()
+    tok_sym = str(tok_obj.get("symbol") or tr.get("token_symbol") or tr.get("tokenSymbol") or tr.get("token") or "")
+    decimals = int(tok_obj.get("decimals") or tr.get("tokenDecimal") or 6) if str(tok_obj.get("decimals") or tr.get("tokenDecimal") or "").isdigit() else 6
+    raw_val = tr.get("total", {}).get("value") if isinstance(tr.get("total"), dict) else tr.get("value") or tr.get("amount") or "0"
+    if str(raw_val).isdigit():
+        amt = f"{int(raw_val) / (10 ** decimals):.6f}"
+    else:
+        amt = str(raw_val)
+    blk_num = int(tr.get("block_number") or tr.get("blockNumber") or 0) if str(tr.get("block_number") or tr.get("blockNumber") or "").isdigit() else 0
+    ts = str(tr.get("timestamp") or tr.get("timeStamp") or "")
+    return FlowEvent(
+        chain_id=chain_id,
+        block_number=blk_num,
+        timestamp=ts,
+        tx_hash=tx_hash,
+        from_address=from_addr.lower(),
+        to_address=to_addr.lower(),
+        event_type="token_transfer",
+        token_address=tok_addr,
+        token_symbol=tok_sym,
+        amount=amt,
+        contract_address=tok_addr,
+        source_provider=source_provider,
+        raw_reference=tr,
+    )
+
+
+def raw_internal_to_flow_event(itx: dict[str, Any], chain_id: int = 137, source_provider: str = "Blockscout") -> FlowEvent:
+    tx_hash = str(itx.get("transaction_hash") or itx.get("hash") or "")
+    from_addr = str(itx.get("from", {}).get("hash") if isinstance(itx.get("from"), dict) else itx.get("from") or "")
+    to_addr = str(itx.get("to", {}).get("hash") if isinstance(itx.get("to"), dict) else itx.get("to") or "")
+    blk_num = int(itx.get("block_number") or itx.get("blockNumber") or 0) if str(itx.get("block_number") or itx.get("blockNumber") or "").isdigit() else 0
+    ts = str(itx.get("timestamp") or itx.get("timeStamp") or "")
+    val = str(itx.get("value") or "0")
+    if val.isdigit() and int(val) > 0:
+        amt = f"{int(val) / 10**18:.6f}"
+    else:
+        amt = val
+    return FlowEvent(
+        chain_id=chain_id,
+        block_number=blk_num,
+        timestamp=ts,
+        tx_hash=tx_hash,
+        from_address=from_addr.lower(),
+        to_address=to_addr.lower(),
+        event_type="internal",
+        token_address="0x0000000000000000000000000000000000000000",
+        token_symbol="POL" if chain_id == 137 else ("BNB" if chain_id == 56 else "ETH"),
+        amount=amt,
+        contract_address=to_addr.lower(),
+        source_provider=source_provider,
+        raw_reference=itx,
+    )
