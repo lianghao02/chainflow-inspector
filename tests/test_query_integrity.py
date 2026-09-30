@@ -169,5 +169,108 @@ class EvidenceCompletenessTests(unittest.TestCase):
         self.assertEqual(snapshot["incomplete_tracks"], ["USDC.e", "pUSD"])
 
 
+    def test_maker_rebates_and_fee_recipient_flagged_as_internal(self):
+        analyzer = Analyzer(PolygonProvider(Settings()))
+        target = "0x" + "a" * 40
+        events = [
+            {
+                "token": {"address": "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb", "decimals": "6"},
+                "from": {"hash": "0xfdb1b8dc7f5789a0c9a398026585b8b10fba5507"}, # Maker Rebates
+                "to": {"hash": target},
+                "total": {"value": "19840600"},
+                "timestamp": "2026-09-30T08:45:05Z",
+                "transaction_hash": "0x" + "1" * 64,
+            },
+            {
+                "token": {"address": "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb", "decimals": "6"},
+                "from": {"hash": "0x115f48dc2a731aa16251c6d6e1befc42f92accc9"}, # Fee Recipient
+                "to": {"hash": target},
+                "total": {"value": "5000000"},
+                "timestamp": "2026-09-30T08:00:00Z",
+                "transaction_hash": "0x" + "2" * 64,
+            }
+        ]
+        candidates = analyzer._funding_candidates(events, target, 0)
+        self.assertEqual(len(candidates), 2)
+        self.assertIn("平台內部／Polymarket 造市回饋金批次撥付", candidates[0]["note"])
+        self.assertIn("平台內部／Polymarket 造市回饋金批次撥付", candidates[1]["note"])
+
+    def test_token_timeout_falls_back_to_unfiltered_inbound_query(self):
+        provider = PolygonProvider(Settings())
+        address = "0x" + "a" * 40
+        token_usdc_e = "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+        
+        # 第一次帶 token 拋出逾時異常；降級查詢不帶 token 成功回傳多種代幣
+        side_effects = [
+            ProviderError("已重試 3 次後仍無法取得公開鏈上資料：The read operation timed out", attempts=3, retryable=True),
+            {
+                "items": [
+                    {
+                        "token": {"address": "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb", "symbol": "pUSD"},
+                        "from": {"hash": "0x1"}, "to": {"hash": address}, "total": {"value": "1000"},
+                        "block_number": 9000,
+                    },
+                    {
+                        "token": {"address": token_usdc_e, "symbol": "USDC.e"},
+                        "from": {"hash": "0x2"}, "to": {"hash": address}, "total": {"value": "2000"},
+                        "block_number": 8990,
+                    },
+                ],
+                "next_page_params": None,
+            }
+        ]
+        with patch("chain_fund_tracer.providers.fetch_json", side_effect=side_effects) as fetch:
+            events = provider.address_token_transfers(address, token=token_usdc_e, filter_dir="to")
+        
+        # 本地記憶體精準過濾出 USDC.e
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["token"]["address"], token_usdc_e)
+        self.assertTrue(any("自動降級" in err for err in provider.last_request_errors))
+
+    def test_initial_query_does_not_send_bare_block_number_cursor(self):
+        provider = PolygonProvider(Settings())
+        address = "0x" + "a" * 40
+        with patch("chain_fund_tracer.providers.fetch_json", return_value={"items": [], "next_page_params": None}) as mock_fetch:
+            provider.address_token_transfers(address, end_block=94600000, filter_dir="to")
+            called_url = mock_fetch.call_args[0][0]
+            self.assertNotIn("block_number=", called_url)
+
+    def test_subpoena_candidates_relay_eoa_and_dex_classifications(self):
+        from chain_fund_tracer.analysis import build_subpoena_candidates
+        from chain_fund_tracer.models import AnalysisResult, TraceStep
+
+        s_relay = TraceStep(
+            "Relay 跨鏈入金", 2, "0xrelay_tx", "2026-09-28 10:00:00", "USDC", "1000",
+            "0xsolver", "0xtarget", "0xsolver", "Bridge", "Relay Solver", "Relay", "已確認", "跨鏈",
+            path_category="跨鏈橋／Relay", line_style="solid", pair_verified=True, relay_request_id="0xreq123",
+        )
+        s_eoa = TraceStep(
+            "個人錢包轉帳", 1, "0xeoa_tx", "2026-09-28 09:00:00", "USDC", "500",
+            "0xeoa_sender", "0xtarget", "0xeoa_sender", "非託管個人錢包", "", "無公開標籤", "未知", "轉帳",
+            path_category="外部錢包轉入", line_style="solid", pair_verified=False,
+        )
+        s_dex = TraceStep(
+            "DEX 兌換", 1, "0xdex_tx", "2026-09-28 08:00:00", "pUSD", "300",
+            "0xdex_router", "0xtarget", "0xdex_router", "DEX", "Uniswap V3 Router", "公開標籤", "高度可能", "兌換",
+            path_category="DEX 兌換", line_style="solid", pair_verified=False,
+        )
+        res = AnalysisResult(query="0xtarget", steps=[s_relay, s_eoa, s_dex])
+        candidates = build_subpoena_candidates(res)
+
+        by_prov = {c.service_provider: c for c in candidates}
+        self.assertIn("Relay Protocol (Relay.link)", by_prov)
+        self.assertEqual(by_prov["Relay Protocol (Relay.link)"].inquiry_value, "可函調跨鏈發起IP與路由紀錄")
+        self.assertIn("Relay Request ID", by_prov["Relay Protocol (Relay.link)"].limitations)
+
+        self.assertIn("非託管個人錢包 (EOA)", by_prov)
+        self.assertEqual(by_prov["非託管個人錢包 (EOA)"].inquiry_value, "無中心化開戶資料（不可直接函調）")
+        self.assertIn("開戶手續費（Gas）", by_prov["非託管個人錢包 (EOA)"].limitations)
+
+        self.assertIn("Uniswap V3 Router", by_prov)
+        self.assertEqual(by_prov["Uniswap V3 Router"].service_type, "DEX 兌換")
+        self.assertEqual(by_prov["Uniswap V3 Router"].inquiry_value, "不可作 KYC 終點")
+        self.assertIn("去中心化撮合合約", by_prov["Uniswap V3 Router"].limitations)
+
+
 if __name__ == "__main__":
     unittest.main()

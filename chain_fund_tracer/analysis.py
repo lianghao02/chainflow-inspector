@@ -20,15 +20,31 @@ NEG_RISK_EXCHANGE = "0xe2222d279d744050d28e00520010520000310f59"
 COLLATERAL_ONRAMP = "0x93070a847efef7f70739046a929d47a521f5b8ee"
 REWARD_DISTRIBUTOR = "0xc288480574783bd7615170660d71753378159c47"
 PUSD_SETTLEMENT = "0xc417fd8e9661c0d2120b64a04bb3278c17e99db1"
+POLYMARKET_FEE_RECIPIENT = "0x115f48dc2a731aa16251c6d6e1befc42f92accc9"
+MAKER_REBATES_DISTRIBUTOR = "0xfdb1b8dc7f5789a0c9a398026585b8b10fba5507"
+DISPERSE_APP_CONTRACT = "0xd152f549545093347a162dce210e7293f1452150"
 RELAY_DEPOSITORY = "0x4cd00e387622c35bddb9b4c962c136462338bc31"
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-POLYMARKET_INTERNAL = {PUSD, CTF_EXCHANGE, NEG_RISK_EXCHANGE, COLLATERAL_ONRAMP, POLYMARKET_CONDITIONAL_TOKENS, REWARD_DISTRIBUTOR, PUSD_SETTLEMENT}
+POLYMARKET_INTERNAL = {
+    PUSD, CTF_EXCHANGE, NEG_RISK_EXCHANGE, COLLATERAL_ONRAMP,
+    POLYMARKET_CONDITIONAL_TOKENS, REWARD_DISTRIBUTOR, PUSD_SETTLEMENT,
+    POLYMARKET_FEE_RECIPIENT, MAKER_REBATES_DISTRIBUTOR, DISPERSE_APP_CONTRACT,
+}
 PUBLIC_ADDRESS_LABELS = {
     "0xe2fc31f816a9b94326492132018c3aecc4a93ae1": (
         "交易所", "Binance: Withdrawals 7", "Blockscan／BscScan 公開標籤（2026-09-23 查核）", "高度可能"
     ),
     "0xb300000b72deaeb607a12d5f54773d1c19c7028d": (
         "DEX", "Binance DEX Router", "BNB Chain 公開合約標籤", "已確認"
+    ),
+    "0x115f48dc2a731aa16251c6d6e1befc42f92accc9": (
+        "平台內部", "Polymarket: Fee Recipient", "DefiLlama 公開協議清冊", "已確認"
+    ),
+    "0xfdb1b8dc7f5789a0c9a398026585b8b10fba5507": (
+        "平台內部", "Polymarket: Maker Rebates Distributor", "DefiLlama 公開協議清冊", "已確認"
+    ),
+    "0xd152f549545093347a162dce210e7293f1452150": (
+        "工具合約", "Disperse.app 批次發送合約", "Polygon 公開工具合約", "已確認"
     ),
 }
 CHAIN_NAMES = {
@@ -213,22 +229,22 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
             limitations = "法幣出金商直充；需持 Tx Hash 與受款地址向服務商調取刷卡訂單人與 KYC 身分。"
 
         elif cat == "跨鏈橋／Relay":
-            service_provider = "Relay" if "relay" in lbl_lower or step.relay_request_id else (lbl or "跨鏈協議")
+            service_provider = "Relay Protocol (Relay.link)" if "relay" in lbl_lower or step.relay_request_id else (lbl or "跨鏈協議")
             service_type = "跨鏈橋／Relay"
-            inquiry_value = "僅供上游追蹤"
-            limitations = "去中心化跨鏈協議；無中心化 KYC 身分，僅供向上追蹤來源鏈發送者與關聯地址。"
+            inquiry_value = "可函調跨鏈發起IP與路由紀錄"
+            limitations = "去中心化跨鏈協議；檢附 Relay Request ID 與目的鏈 Tx，可向 Relay 官方調取發起人 IP 與簽名錢包；出資來源經過多鏈跳轉，需搭配來源鏈上游追蹤。"
 
         elif cat == "DEX 兌換":
-            service_provider = lbl or "DEX Router"
+            service_provider = lbl or "去中心化交易所 (DEX)"
             service_type = "DEX 兌換"
             inquiry_value = "不可作 KYC 終點"
-            limitations = "去中心化撮合合約，無中心化開戶資料；不可列為 KYC 調查對象，僅供判定資產轉換。"
+            limitations = "去中心化撮合合約，無帳號、無註冊資料亦無 KYC；不可列為調證對象。僅供證明涉案資金曾在此進行幣別置換。"
 
         elif cat == "外部錢包轉入":
-            service_provider = "外部個人錢包"
+            service_provider = "非託管個人錢包 (EOA)"
             service_type = "非託管個人錢包"
-            inquiry_value = "僅供上游追蹤"
-            limitations = "鏈上非託管個人地址；需向上游追蹤其手續費來源或交易所提領紀錄。"
+            inquiry_value = "無中心化開戶資料（不可直接函調）"
+            limitations = "⚠️ 本段為鏈上私鑰個人互轉，無中心化 VASP 中介；純鏈上可能無法直接調取自然人 KYC。偵查處方：應鎖定轉出人錢包之開戶手續費（Gas）來源，或需搭配場外通訊與搜索扣案實體載具。"
 
         else:
             continue
@@ -259,8 +275,15 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
         seen_keys.add(key)
         candidates.append(candidate)
 
-    order = {"交易所提幣帳戶函調候選": 0, "可函調 KYC": 0, "僅供上游追蹤": 1, "不可作 KYC 終點": 2}
-    candidates.sort(key=lambda c: (order.get(c.inquiry_value, 3), -event_timestamp(c.datetime_tw)))
+    order = {
+        "交易所提幣帳戶函調候選": 0,
+        "可函調 KYC": 0,
+        "可函調跨鏈發起IP與路由紀錄": 1,
+        "僅供上游追蹤": 2,
+        "無中心化開戶資料（不可直接函調）": 3,
+        "不可作 KYC 終點": 4,
+    }
+    candidates.sort(key=lambda c: (order.get(c.inquiry_value, 5), -event_timestamp(c.datetime_tw)))
     return candidates
 
 
@@ -887,6 +910,9 @@ class Analyzer:
                 f"【入金來源結論】逐筆本金主線命中公開交易所／VASP 標籤：{labels}；"
                 "這證明資金路徑直接關聯，不等於直接確認特定自然人身分。"
             )
+            result.summary.append(
+                f"【法證調證處方】建議檢附 Tx Hash 與受款地址，向該服務商（{labels}）函調該筆提幣之帳號 UID、登入 IP、身分認證（KYC）及關聯入金帳戶。"
+            )
         else:
             auxiliary_labels = "、".join(dict.fromkeys(step.label for step in auxiliary_vasp if step.label))
             relay_note = "（本金主線主要經由跨鏈協議或兌換合約中繼）；" if relay_found else ""
@@ -895,6 +921,22 @@ class Analyzer:
                 if auxiliary_labels else "目前亦無可列為交易所來源的輔助標籤紀錄。"
             )
             result.summary.append(f"【入金來源結論】逐筆本金主線尚未命中可確認的交易所／VASP 公開標籤；{relay_note}{suffix}")
+
+            if relay_found:
+                result.summary.append(
+                    "【法證調證處方】本案本金經由跨鏈橋（Relay Protocol）由其他鏈或幣別轉換撥付；"
+                    "建議檢附 Relay Request ID 與目的鏈交易雜湊，向 Relay 官方調取發起人 IP 與簽名錢包，並持續追蹤來源鏈發起端之上游出資者。"
+                )
+            else:
+                has_eoa_inbound = any(
+                    step.path_category == "外部錢包轉入" or step.classification in ("外部錢包", "非託管個人錢包", "未知地址")
+                    for step in result.steps if step.path_role == "入金"
+                )
+                if has_eoa_inbound:
+                    result.summary.append(
+                        "【法證調證處方（非託管個人錢包限制）】本案入金為鏈上非託管個人私鑰錢包（EOA）互轉或場外金流，無中心化 VASP 中介；"
+                        "純鏈上無開戶資料可直接調取 KYC。偵查處方：建議鎖定大額轉出人錢包，將其作為新目標貼入本工具追查創立時的第一筆原生 POL 手續費（開戶 Gas）來源，或需搭配場外搜索扣案實體載具與通訊電信紀錄。"
+                    )
         result.warnings = list(dict.fromkeys(result.warnings))
         result.sources = list(dict.fromkeys(result.sources))
         return self.finalize_analysis_result(result)
@@ -946,8 +988,17 @@ class Analyzer:
             amount_raw = event.get("total", {}).get("value", "") if isinstance(event.get("total"), dict) else event.get("value", "")
             decimals = int(token_data.get("decimals", 6) or 6); amount = f"{int(str(amount_raw) or '0') / 10**decimals:.6f}" if str(amount_raw).isdigit() else str(amount_raw)
             token = "pUSD" if contract == PUSD else ("USDC.e" if contract == USDC_E else ("USDT" if contract == USDT else "USDC"))
-            internal = normalize(sender) in POLYMARKET_INTERNAL or normalize(sender) == ZERO_ADDRESS
-            note = "平台內部／鑄造事件，已排除為外部來源；應查看同筆 Tx 的 USDC Logs。" if internal else "外部補款候選；需再追此地址的上游 USDC 來源。"
+            sender_norm = normalize(sender)
+            internal = sender_norm in POLYMARKET_INTERNAL or sender_norm == ZERO_ADDRESS
+            if internal:
+                if sender_norm in {POLYMARKET_FEE_RECIPIENT, MAKER_REBATES_DISTRIBUTOR, DISPERSE_APP_CONTRACT}:
+                    note = "平台內部／Polymarket 造市回饋金批次撥付；非外部入金本金。"
+                elif sender_norm == ZERO_ADDRESS:
+                    note = "平台內部／代幣合約原生鑄造（Mint）；非外部入金本金。"
+                else:
+                    note = "平台內部／鑄造事件，已排除為外部來源；應查看同筆 Tx 的 USDC Logs。"
+            else:
+                note = "外部補款候選；需再追此地址的上游 USDC 來源。"
             found.append({"hash": event.get("transaction_hash", event.get("tx_hash", event.get("hash", ""))), "time": str(when), "from": sender, "to": target, "token": token, "contract": contract, "amount": amount, "note": note, "label": event_label(event.get("from")), "block_number": str(event.get("block_number", "")), "log_index": str(event.get("log_index", event.get("index", "")))})
         return sorted(found, key=lambda item: event_timestamp(item["time"]), reverse=True)
 

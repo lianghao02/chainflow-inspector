@@ -424,21 +424,28 @@ class FlowGraph {
     const minRank = sortedRanks[0] || 0;
     const maxRank = sortedRanks[sortedRanks.length - 1] || 4;
 
-    const startX = 140;
-    const endX = 960;
-    const rankSpan = Math.max(maxRank - minRank, 1);
-    const stepX = (endX - startX) / rankSpan;
+    // 動態開闊佈局：保證每欄間距 290px，避免節點與連線氣泡卡片擁擠重疊
+    const colSpacingX = 290;
+    const nodeSpacingY = 88;
+    const startX = 150;
+
+    // 計算各欄所需的最大高度以置中對齊
+    let maxColNodes = 1;
+    sortedRanks.forEach((r) => {
+      const cnt = rankGroups.get(r).length;
+      if (cnt > maxColNodes) maxColNodes = cnt;
+    });
+    const totalGraphHeight = Math.max(480, maxColNodes * nodeSpacingY + 80);
 
     sortedRanks.forEach((r) => {
       const groupNodes = rankGroups.get(r);
-      const x = startX + (r - minRank) * stepX;
+      const x = startX + (r - minRank) * colSpacingX;
       const count = groupNodes.length;
-      const totalY = 460;
-      const spacingY = totalY / (count + 1);
+      const spacingY = totalGraphHeight / (count + 1);
 
       groupNodes.forEach((node, i) => {
         node.x = x;
-        node.y = 70 + (i + 1) * spacingY;
+        node.y = 50 + (i + 1) * spacingY;
       });
     });
 

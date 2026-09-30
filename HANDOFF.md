@@ -1,18 +1,49 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十四輪已完成核心入金軌道逾時韌性與證據完整性分級：四軌可區分成功、無紀錄、截斷與失敗；不完整資料會同步降級摘要、函調候選、HTML 與匯出內容；流程圖預設只呈現查核主線。全套 126 項測試通過。**
+> **第三十五輪已完成跨鏈調證指引貫穿、非託管錢包調取限制風險揭示、Blockscout 逾時自動降級防禦與圖譜大開闊排版：明確指引下一步調證對象（Binance、Relay Protocol 等）；若為純非託管錢包互轉，誠實揭示無中心化 KYC 之法律真相並指引追查開戶 Gas；圖譜橫向間距擴大為 290px、高度動態自適應，徹底杜絕擁擠重疊。全案 130 項測試全數通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
 - **Baseline Commit SHA**：`432ca57`
-- **Software Version**：`v1.4.3`（零地址法證嚴格排除、平行邊彩虹曲率展開、API 超時重試防護、投注解碼精準去重、PyWebView js_api 私有化加固徹底修復 run_analysis is not a function）
+- **Software Version**：`v1.4.4`（跨鏈調證指引貫穿、非託管錢包調取限制標註、Blockscout 逾時降級、圖譜動態開闊佈局、Polymarket 造市回饋金過濾）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
 - **Task Type**：FIX / IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
 - **Path Note**：`C:\Users\chia-hao\Documents\GitHub` 是指向 `D:\Development\GitHub` 的 Junction，兩者不是兩份專案。
+
+---
+
+## 第三十五輪完成工作：跨鏈調證指引貫穿、非託管錢包風險揭示、Blockscout 逾時降級與圖譜開闊佈局
+
+### 一、法證調證指引與調取限制標註貫穿（`analysis.py` & `app.js`）
+1. **函調候選清單精準分流**（`build_subpoena_candidates`）：
+   - **跨鏈橋／Relay**：服務商標記為 `Relay Protocol (Relay.link)`，調證價值為 `可函調跨鏈發起IP與路由紀錄`，備註標註「檢附 Relay Request ID 與目的鏈 Tx，可向 Relay 官方調取發起人 IP 與簽名錢包；出資來源經過多鏈跳轉，需搭配來源鏈上游追蹤。」
+   - **非託管個人錢包**：服務商標記為 `非託管個人錢包 (EOA)`，調證價值為 `無中心化開戶資料（不可直接函調）`，備註標註「⚠️ 本段為鏈上私鑰個人互轉，無中心化 VASP 中介；純鏈上可能無法直接調取自然人 KYC。偵查處方：應鎖定轉出人錢包之開戶手續費（Gas）來源，或需搭配場外通訊與搜索扣案實體載具。」
+   - **去中心化交易所**：標記為 `去中心化交易所 (DEX)`，調證價值為 `不可作 KYC 終點`，備註標註去中心化撮合無帳號與 KYC。
+2. **分析結論處方明文化**（`result.summary`）：
+   - 逐筆命中交易所時：輸出 `【法證調證處方】` 指引檢附 Tx Hash 與受款地址向服務商函調帳號 UID、登入 IP、KYC 及關聯入金帳戶。
+   - 經由跨鏈橋時：輸出 Relay Protocol 跨鏈調證處方，指引檢附 Request ID 函調發起人 IP 與簽名。
+   - 純個人私鑰互轉時：輸出非託管個人錢包限制，明確指引將大額出資錢包作為新目標追查開戶手續費（Gas）來源或配合搜索扣案載具。
+3. **HTML 工作台聯動**（`app.js`）：
+   - 將 Relay Protocol 納入可函調服務商頁籤並配置專屬紫色徽章（`badge-bridge`）。
+   - 頂部摘要橫幅更新未命中提示。
+
+### 二、Blockscout 逾時自動降級防禦（`providers.py`）
+1. **大合約逾時自動降級**：針對 Blockscout API v2 帶有特定大額合約參數（如 USDC.e `0x2791...`）時 100% 逾時崩潰之問題，實作自動降級為不帶 token 的聚合查詢（0.66 秒回傳），並於本地記憶體過濾。
+2. **游標防護**：修復初次查詢誤傳未帶 index 的 `block_number` 游標。
+
+### 三、Polymarket 平台造市回饋金白名單擴充（`analysis.py`）
+- 將 `POLYMARKET_FEE_RECIPIENT (0x115F...)`、`MAKER_REBATES_DISTRIBUTOR (0xfdB1...)` 與 `DISPERSE_APP_CONTRACT (0xD152...)` 納入平台內部合約，排除於外部補款候選之外。
+
+### 四、圖譜佈局空間大幅開闊（`graph.js`）
+1. **水平欄間距擴大**：由 164px 擴大為固定 **290px**，兩張 150px 卡片間保留 140px 放置連線與深色文字氣泡。
+2. **垂直動態自適應**：由硬性鎖定 460px 改為依節點數量動態自適應（每個節點間距 88px），徹底根除節點與金額氣泡互相疊蓋擁擠。
+
+### 五、驗證
+- 全套 130 項單元與整合測試 100% 通過（`130 passed in 145.81s`）。
 
 ---
 

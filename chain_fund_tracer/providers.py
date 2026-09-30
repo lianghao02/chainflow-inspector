@@ -443,6 +443,61 @@ class PolygonProvider:
             query = urlencode({"chainid":137,"module":"account","action":"txlist","address":address,"sort":"desc","page":1,"offset":self.settings.page_size,"apikey":self.settings.etherscan_api_key})
             data = fetch_json(f"https://api.etherscan.io/v2/api?{query}"); return data.get("result", []) if isinstance(data.get("result"), list) else []
 
+    def _etherscan_token_transfers(
+        self,
+        address: str,
+        token: str | None = None,
+        start_block: int | None = None,
+        end_block: int | None = None,
+        page: int = 1,
+        offset: int = 50,
+    ) -> list[dict[str, Any]]:
+        """透過 Etherscan v2 API (PolygonScan) 查詢 ERC-20 轉帳。"""
+        if not getattr(self.settings, "etherscan_api_key", ""):
+            return []
+        query: dict[str, Any] = {
+            "chainid": 137,
+            "module": "account",
+            "action": "tokentx",
+            "address": address,
+            "sort": "desc",
+            "page": page,
+            "offset": offset,
+            "apikey": self.settings.etherscan_api_key,
+        }
+        if token:
+            query["contractaddress"] = token
+        if start_block is not None:
+            query["startblock"] = start_block
+        if end_block is not None:
+            query["endblock"] = end_block
+
+        url = f"https://api.etherscan.io/v2/api?{urlencode(query)}"
+        data = fetch_json(url)
+        items = data.get("result", []) if isinstance(data, dict) and isinstance(data.get("result"), list) else []
+        normalized: list[dict[str, Any]] = []
+        for it in items:
+            ts_raw = it.get("timeStamp", "0")
+            try:
+                ts_iso = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc).isoformat()
+            except (ValueError, TypeError):
+                ts_iso = ""
+            normalized.append({
+                "token": {
+                    "address": it.get("contractAddress", token or ""),
+                    "symbol": it.get("tokenSymbol", ""),
+                    "decimals": str(it.get("tokenDecimal", "6")),
+                    "name": it.get("tokenName", ""),
+                },
+                "from": {"hash": it.get("from", "")},
+                "to": {"hash": it.get("to", "")},
+                "total": {"value": str(it.get("value", "0"))},
+                "timestamp": ts_iso,
+                "transaction_hash": it.get("hash", ""),
+                "block_number": int(it.get("blockNumber", 0)) if str(it.get("blockNumber", "")).isdigit() else it.get("blockNumber"),
+            })
+        return normalized
+
     def address_token_transfers(
         self,
         address: str,
@@ -452,13 +507,18 @@ class PolygonProvider:
         filter_dir: str | None = None,
         max_pages: int | None = None,
     ) -> list[dict[str, Any]]:
-        """讀取 Explorer 已索引的 ERC-20 轉帳；支援指定區塊高度範圍、代幣合約與方向（to/from）。"""
+        """讀取 Explorer 已索引的 ERC-20 轉帳；支援指定區塊高度範圍、代幣合約與方向（to/from）。
+        具備三層防禦韌性架構：
+        1. 主端點定向索引查詢
+        2. Etherscan v2 API 自動備援
+        3. 代幣索引逾時自動降級（去除特定 token 條件，以 address filter 查詢後於本地篩選）
+        """
         limit_pages = max_pages if max_pages is not None else getattr(self.settings, "max_history_pages", 15)
         explorer_urls = [self.settings.blockscout_url, *getattr(self.settings, "explorer_fallback_urls", [])]
         explorer_urls = list(dict.fromkeys(url.rstrip("/") for url in explorer_urls if str(url).strip()))
+        
+        # 注意：Blockscout v2 之 block_number 係游標參數需搭配 index，初次查詢不傳遞 block_number
         params: dict[str, Any] = {"type": "ERC-20", "items_count": 50}
-        if end_block is not None:
-            params["block_number"] = end_block
         if token:
             params["token"] = token
         if filter_dir:
@@ -478,11 +538,13 @@ class PolygonProvider:
 
         seen_blocks: list[int] = []
         active_endpoint = 0
+        downgraded_to_unfiltered = False
 
         for _ in range(limit_pages):
             self.last_scanned_pages += 1
             data: dict[str, Any] | None = None
             last_error: ProviderError | None = None
+            
             for endpoint_index in range(active_endpoint, len(explorer_urls)):
                 base = f"{explorer_urls[endpoint_index]}/addresses/{address}/token-transfers"
                 request_audit: dict[str, Any] = {}
@@ -505,17 +567,61 @@ class PolygonProvider:
                     self.last_request_retryable = exc.retryable
                     self.last_request_error_message = str(exc)
                     last_error = exc
+
+            # 若特定 token 查詢失敗/逾時，依序觸發 Etherscan 與降級策略
+            if data is None and token and not downgraded_to_unfiltered:
+                # 嘗試 1：Etherscan v2 API 備援
+                if getattr(self.settings, "etherscan_api_key", ""):
+                    try:
+                        eth_items = self._etherscan_token_transfers(
+                            address=address, token=token, start_block=start_block, end_block=end_block,
+                        )
+                        if eth_items:
+                            self.last_request_errors.append("主端點逾時，已透過 Etherscan v2 備援取得代幣轉帳。")
+                            self.last_request_error_message = ""
+                            data = {"items": eth_items}
+                    except Exception as eth_exc:
+                        self.last_request_errors.append(f"Etherscan 備援查詢失敗：{eth_exc}")
+
+                # 嘗試 2：Blockscout 代幣專屬索引逾時，降級為不帶 token 的地址聚合轉帳查詢
+                if data is None:
+                    downgraded_to_unfiltered = True
+                    params_fallback = {"type": "ERC-20", "items_count": 50}
+                    if filter_dir:
+                        params_fallback["filter"] = filter_dir
+                    base = f"{explorer_urls[0]}/addresses/{address}/token-transfers"
+                    request_audit = {}
+                    try:
+                        data = fetch_json(
+                            f"{base}?{urlencode(params_fallback)}",
+                            max_retries=1,
+                            request_audit=request_audit,
+                        )
+                        self.last_request_errors.append("Blockscout 代幣索引逾時，已自動降級為地址轉入聚合掃描並於本地記憶體篩選。")
+                        self.last_request_error_message = ""
+                        # 將後續分頁切換為不帶 token 模式
+                        params = params_fallback
+                    except Exception as fb_exc:
+                        last_error = ProviderError(f"降級聚合查詢亦失敗：{fb_exc}")
+
             if data is None:
                 if last_error is None:
                     raise ProviderError("未設定可用的 Explorer 歷史索引端點", attempts=0, retryable=False)
                 raise ProviderError(
-                    self.last_request_error_message,
+                    self.last_request_error_message or str(last_error),
                     attempts=self.last_request_attempts,
                     retryable=self.last_request_retryable,
                 ) from last_error
+
             items = data.get("items", [])
             self.token_history_scanned_count += len(items)
             for item in items:
+                # 若處於降級模式，在本地篩選 token
+                if downgraded_to_unfiltered and token:
+                    item_tok = str(item.get("token", {}).get("address") or item.get("token_address") or "").lower()
+                    if item_tok != token.lower():
+                        continue
+
                 blk_num = item.get("block_number")
                 if blk_num is not None:
                     try:
@@ -549,7 +655,7 @@ class PolygonProvider:
                         pass
 
             params = {"type": "ERC-20", **next_page}
-            if token and "token" not in params:
+            if not downgraded_to_unfiltered and token and "token" not in params:
                 params["token"] = token
             if filter_dir and "filter" not in params:
                 params["filter"] = filter_dir

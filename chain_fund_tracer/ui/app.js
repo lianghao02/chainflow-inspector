@@ -325,7 +325,7 @@ function renderAllResults(data) {
   });
 
   // 2. 調證候選分流：交易所／服務商函調候選 vs 上游追查節點
-  const actionableValues = new Set(['交易所提幣帳戶函調候選', '可函調 KYC']);
+  const actionableValues = new Set(['交易所提幣帳戶函調候選', '可函調 KYC', '可函調跨鏈發起IP與路由紀錄']);
   const kycCandidates = subpoenas.filter((c) => actionableValues.has(c.inquiry_value));
   const upstreamCandidates = subpoenas.filter((c) => !actionableValues.has(c.inquiry_value));
 
@@ -370,7 +370,7 @@ function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
     kycEl.textContent = `${providers} (${kycCandidates.length})`;
     kycEl.classList.add('highlight');
   } else {
-    kycEl.textContent = '尚未命中交易所';
+    kycEl.textContent = '尚未命中交易所或跨鏈服務商';
     kycEl.classList.remove('highlight');
   }
 
@@ -586,7 +586,11 @@ function renderKycTable(candidates) {
     const tdType = createTextElement('td', c.service_type || '中心化交易所');
 
     const tdVal = document.createElement('td');
-    const badge = createTextElement('span', c.inquiry_value || '可函調 KYC', 'badge badge-vasp');
+    let badgeCls = 'badge badge-vasp';
+    if (c.service_type === '跨鏈橋／Relay') {
+      badgeCls = 'badge badge-bridge';
+    }
+    const badge = createTextElement('span', c.inquiry_value || '可函調 KYC', badgeCls);
     tdVal.appendChild(badge);
 
     const tdAmt = createTextElement('td', `${c.amount || '0'} ${c.asset || ''}`, 'mono');
