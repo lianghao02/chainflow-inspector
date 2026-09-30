@@ -71,6 +71,11 @@
    - 左側面板顯示 USDC、USDC.e、pUSD、USDT 四大幣別之完成/截斷/失敗狀態徽章。
 8. **頂部匯出整合為下拉選單**：
    - 整合為「📥 匯出法證文件 ▾」，點開選擇 ZIP、CSV、TXT、SVG，釋放頂端導覽列空間。
+9. **Relay 跨鏈主線完整閉環與節點身分重構（`graph.js`）**：
+   - 節點鍵值升級為 `chain_id:address`，徹底杜絕跨鏈同地址或不同步驟位置被錯誤共用。
+   - 建立專屬紫色「Relay Request 跨鏈配對節點」，將來源鏈實體轉帳（`來源錢包 → Relay Request`）與目的鏈撥付（`Relay Request ═[已唯一配對]═> Relay Solver → Polymarket Proxy`）以紫色雙線跨鏈配對完整串接，徹底消除跨鏈看似斷線的假象。
+   - 協定內部事件（pUSD 鑄造、下注買賣、CTF 合約等）附掛於 Proxy 下游（Rank 5），不與本金主線平行割裂。
+   - 實作 Topological Layered Layout 拓撲分層排版，主線流向由左至右階梯展開，視覺邏輯與右側法證結論完全吻合。
 
 ---
 
