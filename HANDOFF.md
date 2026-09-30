@@ -1,14 +1,14 @@
 # HANDOFF
 
 > **給接手 Agent（Codex / Antigravity）的交接一句話**：
-> **第三十一輪已完成 HTML 工作台全面改版（PyWebView + 本機 HTML/CSS/原生 JS）與法證可靠性補強（入金 7 大路徑分類、函調候選清單提煉、4 軌核心儲備代幣透明稽核）；110 項測試與語法檢查通過；4 個真實案件地址實機核覈通過。**
+> **第三十一輪已打通初衷核心：個人錢包自動向上遞迴（Recursive Upstream Tracing 直到命中交易所）＋初始原生 POL 手續費開戶來源穿透（命中交易所直接納入調證清單）；升級 HTML 視覺化工作台（PyWebView）；112 項測試與語法檢查通過；4 個真實案件地址實機核覈通過。**
 
 ## 核心元資料
 
 - **Repository**：`https://github.com/lianghao02/chainflow-inspector`（公開）
 - **Branch**：`main`
 - **Baseline Commit SHA**：`7a494b7`
-- **Software Version**：`v1.4.0`（PyWebView 現代化法證工作台、入金 7 大路徑分類、函調候選清單提煉、核心儲備代幣透明稽核）
+- **Software Version**：`v1.4.0`（PyWebView 現代化法證工作台、個人錢包遞迴向上追溯、初始手續費開戶來源穿透、入金 7 大路徑分類、函調候選清單提煉、核心儲備代幣透明稽核）
 - **Skill Version**：`lianghao-development v1.0.0`、`product-design v1.0.0`、`windows-tool-ux v1.0.0`、`project-planning v1.0.0`
 - **Task Type**：IMPROVE / RELEASE
 - **Canonical Project**：`D:\Development\GitHub\chain-fund-tracer`
@@ -16,14 +16,18 @@
 
 ---
 
-## 第三十一輪完成工作：HTML 介面全面替換（PyWebView）與法證可靠性補強（入金 7 大分類、函調清單提煉與 4 軌透明稽核）
+## 第三十一輪完成工作：回歸初衷核心（個人錢包自動遞迴續追至交易所＋初始 Gas 開戶穿透）與 PyWebView HTML 工作台
 
 ### 一、法證可靠性補強（核心底層強化）
 
-1. **新增「函調候選清單」（Subpoena Candidates）資料模型**：
+1. **非託管個人錢包（EOA）自動向上遞迴追查（`_append_eoa_recursive_upstream`）**：
+   - 拒絕在第一跳遇到未標籤個人錢包時停步，自動將該地址作為種子向上追查 2～5 跳本金來源，直到命中中心化交易所（Binance、OKX、MAX、BitoPro 等）或達到跳數上限為止；命中交易所後該分支自動停止遞迴。
+2. **初始原生 POL 手續費開戶出資來源穿透（`_inspect_initial_gas_funder`）**：
+   - 針對鏈上個人錢包自動檢索歷史最早之原生 POL 燃料轉入；若來自中心化交易所熱錢包，自動在圖譜建立點線供資關聯，並提煉至「函調候選清單」標註為 `[可函調 KYC] (手續費開戶出資來源)`，直接鎖定法定調證破口。
+3. **新增「函調候選清單」（Subpoena Candidates）資料模型**：
    - 於 `chain_fund_tracer/models.py` 新增 `SubpoenaCandidate` 模型，欄位涵蓋：候選服務商、類型（中心化交易所／入金服務商／非託管個人錢包等）、關聯層級（逐筆本金／資金池關聯／輔助線索）、鏈別與地址、交易資料（Tx Hash、UTC+8 時間、資產、金額）、標籤依據、函調價值（`可函調 KYC` / `僅供上游追蹤` / `不可作 KYC 終點`）與法定法證限制說明。
    - `AnalysisResult` 新增 `subpoena_candidates` 與 `query_tracks` 屬性，並更新完整序列化與反序列化函式。
-2. **入金 7 大路徑客觀分類（`classify_path_category`）**：
+4. **入金 7 大路徑客觀分類（`classify_path_category`）**：
    - 於 `chain_fund_tracer/analysis.py` 實作自動分類器，將所有入金步驟精確歸納至：
      - `交易所直提`（經公開標籤確認之 CEX 熱錢包）
      - `跨鏈橋／Relay`（同鏈／跨鏈 Relay 兌換與撥付）
@@ -32,12 +36,13 @@
      - `外部錢包轉入`（未具公開標籤之外部 EOA 錢包）
      - `Polymarket 平台內部回款／贖回`（CTFExchange、NegRisk 合約結算與贖回）
      - `未能分類`（無法明確識別型態者）
-3. **函調候選清單提煉器（`build_subpoena_candidates`）**：
+5. **函調候選清單提煉器（`build_subpoena_candidates`）**：
    - 自動過濾平台內部結算合約與兌換合約，針對命中中心化交易所之入金標註 `[可函調 KYC]`，針對個人轉入標註 `[僅供上游追蹤]`，針對資金池混合標註法證限制（「資金池混合，非逐筆歸屬」），杜絕把中繼節點或平台合約誤列為 KYC 調證對象。
-4. **定向代幣查詢軌道透明稽核（`targeted_track_audit`）**：
+6. **定向代幣查詢軌道透明稽核（`targeted_track_audit`）**：
    - 在 `PolygonProvider.targeted_inbound_token_transfers` 中建立完整軌道稽核機制，逐軌（USDC、USDC.e、pUSD、USDT）記錄檢索狀態（`success` / `truncated` / `error`）、掃描頁數、取得筆數、起訖區塊與錯誤明細；全面移除 `except Exception: pass` 靜默略過行為。
    - 若觸及單次上限（預設 5 頁 250 筆），於報告與清單公開提示「此幣別歷史尚未完整；未命中不代表沒有更早入金」，杜絕偽陰性結論。
-5. **匯出功能擴充**：
+7. **匯出功能擴充**：
+   - 在 `chain_fund_tracer/exporters.py` 新增 `export_subpoena_csv()`，並在「匯出證據包」ZIP 檔案內自動整合 `subpoena_candidates.csv`。
    - 在 `chain_fund_tracer/exporters.py` 新增 `export_subpoena_csv()`，並在「匯出證據包」ZIP 檔案內自動整合 `subpoena_candidates.csv`。
 
 ---

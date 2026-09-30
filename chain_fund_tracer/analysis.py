@@ -129,7 +129,7 @@ def classify_path_category(step: TraceStep) -> str:
     if cls_name == "入金服務商" or any(w in lbl for w in ("moonpay", "simplex", "transak", "banxa", "ramp network")):
         return "法幣／信用卡入金服務商"
 
-    exchange_keywords = ("binance", "okx", "bitget", "bybit", "coinbase", "kraken", "mexc", "gate.io", "max exchange", "bito")
+    exchange_keywords = ("binance", "okx", "bitget", "bybit", "coinbase", "kraken", "mexc", "gate.io", "max exchange", "bitopro", "bito")
     if (
         cls_name in ("交易所", "VASP")
         or (lbl and any(w in lbl for w in exchange_keywords) and "router" not in lbl and "dex" not in lbl)
@@ -139,14 +139,15 @@ def classify_path_category(step: TraceStep) -> str:
     if cls_name == "DEX" or any(w in lbl for w in ("dex", "router", "swap", "uniswap", "quickswap")):
         return "DEX 兌換"
 
-    if cls_name in ("外部錢包", "未知地址") or not lbl or cls_name == "個人錢包":
+    if cls_name in ("外部錢包", "未知地址", "非託管個人錢包") or not lbl or cls_name == "個人錢包":
         return "外部錢包轉入"
 
     return "未能分類"
 
+
 def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]:
-    """從分析步驟中提煉法證「函調候選清單」，排除純平台內部合約與無函調價值的純雜訊，
-    並區分可函調 KYC、僅供上游追蹤與不可作 KYC 終點。
+    """從分析步驟提煉法證「函調候選清單」，排除純平台撮合與無調證價值之資訊，
+    並標註可函調 KYC、僅供上游追蹤與不可作 KYC 終點。
     """
     candidates: list[SubpoenaCandidate] = []
     seen_keys: set[tuple[str, str, str]] = set()
@@ -163,7 +164,7 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
         lbl = step.label or ""
         lbl_lower = lbl.lower()
         cls_name = step.classification or ""
-        cat = step.path_category or classify_path_category(step)
+        cat = step.path_category if (step.path_category and step.path_category != "未能分類") else classify_path_category(step)
 
         service_provider = ""
         service_type = ""
@@ -179,7 +180,10 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
                 service_provider = lbl or "未具名交易所"
             service_type = "中心化交易所"
             inquiry_value = "可函調 KYC"
-            limitations = "交易所出金熱錢包；非個人專屬充值地址，需向交易所調取該筆提幣 UID、登入 IP 與 KYC 身分。"
+            if step.event_role == "手續費供資":
+                limitations = "交易所燃料手續費出金；非逐筆本金，但為該個人錢包開戶／手續費出資來源，可向交易所調取該筆提幣帳戶 KYC。"
+            else:
+                limitations = "交易所出金熱錢包；非個人專屬充值地址，需向交易所調取該筆提幣 UID、登入 IP 與 KYC 身分。"
 
         elif cat == "法幣／信用卡入金服務商":
             for sp in ("MoonPay", "Simplex", "Transak", "Banxa", "Ramp Network"):
@@ -238,6 +242,7 @@ def build_subpoena_candidates(result: AnalysisResult) -> list[SubpoenaCandidate]
     order = {"可函調 KYC": 0, "僅供上游追蹤": 1, "不可作 KYC 終點": 2}
     candidates.sort(key=lambda c: (order.get(c.inquiry_value, 3), -event_timestamp(c.datetime_tw)))
     return candidates
+
 
 class Analyzer:
     def __init__(self, provider: PolygonProvider, progress: Callable[[str], None] | None = None):
@@ -720,6 +725,46 @@ class Analyzer:
                 step for step in result.steps
                 if not (step.direction == "地址入金" and step.tx_hash in matched_direct_hashes)
             ]
+
+        # 對於未命中 Relay 的直接外部入金候選（非託管個人錢包 EOA 轉入）：
+        # 自動啟動個人錢包遞迴向上追查（Recursive Upstream Tracing）直到命中交易所或達上限跳數
+        seen_upstream: set[str] = {normalize(address)}
+        for item in direct_inbound_candidates[:10]:
+            if item["hash"] in matched_direct_hashes:
+                continue
+            from_addr = item["from"]
+            from_kind, from_lbl, _, _ = self.classify(from_addr, item.get("label", ""))
+            # 若第一跳已直接是交易所（例如幣安直提），無需再向上追
+            if from_kind == "交易所":
+                continue
+            # 若第一跳為個人錢包／未標籤地址，自動向上遞迴追查本金與初始 POL 手續費來源
+            self._append_eoa_recursive_upstream(
+                result,
+                eoa_address=from_addr,
+                cutoff=event_timestamp(item["time"]),
+                current_hop=2,
+                max_hops=hops,
+                expected_token=item.get("token", "USDC"),
+                expected_amount=item.get("amount", ""),
+                seen=seen_upstream,
+            )
+
+        # 針對可唯一配對但未走 Relay 的底層 USDC 入金出資人，同樣啟動個人錢包遞迴追查
+        for item in confirmed_underlying[:10]:
+            und_from = item.get("from", "")
+            if normalize(und_from) not in POLYMARKET_INTERNAL | {ZERO_ADDRESS}:
+                und_kind, _, _, _ = self.classify(und_from, item.get("label", ""))
+                if und_kind != "交易所":
+                    self._append_eoa_recursive_upstream(
+                        result,
+                        eoa_address=und_from,
+                        cutoff=event_timestamp(item["time"]),
+                        current_hop=3,
+                        max_hops=hops,
+                        expected_token=item.get("token", "USDC"),
+                        expected_amount=item.get("amount", ""),
+                        seen=seen_upstream,
+                    )
 
         relay_found = relay_matches > 0
         result.summary.append(
@@ -1244,6 +1289,7 @@ class Analyzer:
     ) -> None:
         """追蹤同鏈 Relay 使用者錢包的上游直接轉帳（實線）與中間資金池關聯（虛線／點線）。"""
         self.progress(f"正在追蹤 Relay 使用者錢包 {sender[:10]}… 的直接上游入金…")
+        self._inspect_initial_gas_funder(result, sender, cutoff=cutoff, hop=3)
         try:
             history = self.provider.address_token_transfers(sender)
         except ProviderError as exc:
@@ -1319,6 +1365,197 @@ class Analyzer:
                 f"Relay 前共找到 {len(inbound)} 筆上游入金，但沒有唯一一筆同時符合 "
                 f"{expected_amount} {expected_token}；已改列候選虛線，不認定為本金來源。"
             )
+
+    def _inspect_initial_gas_funder(
+        self,
+        result: AnalysisResult,
+        eoa_address: str,
+        cutoff: float = 0.0,
+        hop: int = 2,
+    ) -> bool:
+        """查核非託管個人錢包之原生 POL 手續費開戶出資來源（若來自交易所則直接鎖定調證對象）。"""
+        norm_eoa = normalize(eoa_address)
+        if not norm_eoa or norm_eoa in POLYMARKET_INTERNAL | {ZERO_ADDRESS}:
+            return False
+
+        native_fn = getattr(self.provider, "address_native_transfers_before", None)
+        if not native_fn:
+            return False
+        try:
+            native_transfers = native_fn(eoa_address, max_items=50)
+        except Exception:
+            return False
+
+        valid_transfers = []
+        for t in native_transfers:
+            try:
+                val = float(str(t.get("value", "0")))
+            except (ValueError, TypeError):
+                val = 0.0
+            if val <= 0:
+                continue
+            t_time = t.get("timestamp", "")
+            if cutoff and event_timestamp(t_time) >= cutoff:
+                continue
+            valid_transfers.append(t)
+
+        if not valid_transfers:
+            return False
+
+        for t in valid_transfers:
+            t_recipient = event_address(t.get("to"))
+            if t_recipient and normalize(t_recipient) != norm_eoa:
+                continue
+            f_sender = event_address(t.get("from"))
+            if normalize(f_sender) in POLYMARKET_INTERNAL | {ZERO_ADDRESS, norm_eoa}:
+                continue
+            f_lbl = event_label(t.get("from"))
+            f_hash = t.get("hash", "")
+            if not f_lbl and f_hash:
+                tx_dtl = self.provider.transaction_details(f_hash)
+                if tx_dtl:
+                    f_lbl = event_label(tx_dtl.get("from"))
+
+            kind, label, label_source, confidence = self.classify(f_sender, f_lbl)
+            lbl_lower = (label or f_lbl or "").lower()
+            is_exchange = (
+                kind == "交易所"
+                or any(kw in lbl_lower for kw in ("binance", "okx", "bybit", "bitget", "coinbase", "kraken", "max exchange", "bitopro", "mexc", "gate.io"))
+            )
+
+            if is_exchange:
+                val_pol = t.get("value", "0")
+                tx_time = t.get("timestamp", "")
+                gas_note = (
+                    f"原生 POL 供資關聯（開戶燃料來源）：{label or '中心化交易所'} 曾向個人錢包 {eoa_address[:10]}… 轉入原生 POL 作為燃料手續費；"
+                    "非本案下注本金，但為該個人錢包開戶／手續費出資來源，可持此 Tx 向交易所調取帳戶提幣帳號與 KYC。"
+                )
+                step_gas = TraceStep(
+                    "手續費供資", hop, f_hash, timestamp_to_text(tx_time),
+                    "POL", str(val_pol), f_sender, eoa_address, f_sender,
+                    "交易所", label or "中心化交易所", label_source or "Explorer 原生交易索引", confidence or "高度可能",
+                    "僅資金關聯", gas_note,
+                    chain="Polygon", block_number=str(t.get("block_number", "")), log_index="",
+                    path_role="入金", event_role="手續費供資", explorer_url=f"https://polygonscan.com/tx/{f_hash}",
+                    chain_id=137, evidence_source="Explorer 原生交易索引",
+                    line_style="dotted",
+                )
+                if not any(s.tx_hash == f_hash and s.event_role == "手續費供資" for s in result.steps):
+                    result.steps.append(step_gas)
+                    result.summary.append(
+                        f"【手續費開戶來源】個人錢包 {eoa_address[:10]}… 原生 POL 燃料來自交易所：{label}（{val_pol} POL，Tx：{f_hash}）"
+                    )
+                return True
+        return False
+
+    def _append_eoa_recursive_upstream(
+        self,
+        result: AnalysisResult,
+        eoa_address: str,
+        cutoff: float,
+        current_hop: int,
+        max_hops: int,
+        expected_token: str = "USDC",
+        expected_amount: str = "",
+        seen: set[str] | None = None,
+    ) -> None:
+        """非託管個人錢包（EOA）自動向上遞迴追查：
+        1. 自動查核該錢包之初始原生 POL 燃料來源（命中交易所則鎖定調證對象）
+        2. 自動向上檢索穩定幣入金來源，逐跳遞迴，直到命中交易所或達到最大跳數
+        """
+        if seen is None:
+            seen = set()
+        norm_addr = normalize(eoa_address)
+        if not norm_addr or norm_addr in seen or current_hop > max_hops:
+            return
+        seen.add(norm_addr)
+
+        self.progress(f"正在向上追查個人錢包 {eoa_address[:10]}… 之資金來源（第 {current_hop} 跳）…")
+
+        # 1. 優先查核該個人錢包的原生 POL 燃料開戶出資來源
+        self._inspect_initial_gas_funder(result, eoa_address, cutoff=cutoff, hop=current_hop)
+
+        # 2. 向上追查穩定幣入金來源
+        try:
+            history = self.provider.address_token_transfers(eoa_address)
+        except ProviderError as exc:
+            result.warnings.append(f"無法查詢個人錢包 {eoa_address[:10]}… 轉帳記錄：{exc}")
+            return
+
+        inbound = self._generic_inbound_candidates(history, eoa_address, cutoff, token_symbol=expected_token)
+        if not inbound:
+            inbound = self._generic_inbound_candidates(history, eoa_address, cutoff)
+
+        if not inbound:
+            return
+
+        valid_inbound = [
+            item for item in inbound
+            if normalize(item["from"]) not in POLYMARKET_INTERNAL | {ZERO_ADDRESS, norm_addr}
+        ]
+
+        for item in valid_inbound[:2]:
+            intermediate_addr = item["from"]
+            item_hash = item["hash"]
+            item_time = item["time"]
+            item_token = item["token"]
+            item_amount = item["amount"]
+            item_block = item.get("block_number", "")
+
+            source_kind, source_label, source_origin, source_conf = self.classify(intermediate_addr, item.get("label", ""))
+            lbl_lower = (source_label or "").lower()
+            is_exchange = (
+                source_kind == "交易所"
+                or any(kw in lbl_lower for kw in ("binance", "okx", "bybit", "bitget", "coinbase", "kraken", "max exchange", "bitopro", "mexc", "gate.io"))
+            )
+
+            if is_exchange:
+                direct_note = (
+                    f"上游命中中心化交易所直提：{source_label or '交易所'}；"
+                    f"為個人錢包 {eoa_address[:10]}… 之本金來源，可持此 Tx 向交易所調取該筆提幣帳戶 KYC。"
+                )
+                step_direct = TraceStep(
+                    "來源鏈上游", current_hop, item_hash, timestamp_to_text(item_time),
+                    item_token, item_amount, intermediate_addr, eoa_address, intermediate_addr,
+                    "交易所", source_label or "中心化交易所", source_origin, source_conf or "高度可能",
+                    "僅資金關聯", direct_note,
+                    chain="Polygon", block_number=str(item_block), log_index="",
+                    path_role="入金", event_role="轉帳", explorer_url=f"https://polygonscan.com/tx/{item_hash}",
+                    chain_id=137, evidence_source="Explorer Token Transfers 索引",
+                    line_style="solid",
+                )
+                result.steps.append(step_direct)
+                result.summary.append(
+                    f"【本金上游來源】個人錢包 {eoa_address[:10]}… 之本金來自交易所：{source_label}（{item_amount} {item_token}，Tx：{item_hash}）"
+                )
+            else:
+                eoa_note = (
+                    f"上游非託管個人錢包轉入（第 {current_hop} 跳）；"
+                    f"資金由 {intermediate_addr[:10]}… 轉至 {eoa_address[:10]}…，需持續向上追查其出資來源。"
+                )
+                step_eoa = TraceStep(
+                    "來源鏈上游", current_hop, item_hash, timestamp_to_text(item_time),
+                    item_token, item_amount, intermediate_addr, eoa_address, intermediate_addr,
+                    "非託管個人錢包", source_label or "外部個人錢包", source_origin, source_conf or "未知",
+                    "僅資金關聯", eoa_note,
+                    chain="Polygon", block_number=str(item_block), log_index="",
+                    path_role="入金", event_role="轉帳", explorer_url=f"https://polygonscan.com/tx/{item_hash}",
+                    chain_id=137, evidence_source="Explorer Token Transfers 索引",
+                    line_style="solid",
+                )
+                result.steps.append(step_eoa)
+
+                if current_hop < max_hops:
+                    self._append_eoa_recursive_upstream(
+                        result,
+                        eoa_address=intermediate_addr,
+                        cutoff=event_timestamp(item_time),
+                        current_hop=current_hop + 1,
+                        max_hops=max_hops,
+                        expected_token=item_token,
+                        expected_amount=item_amount,
+                        seen=seen,
+                    )
 
     def _inspect_intermediate_pool(self, result: AnalysisResult, pool_address: str, cutoff: float, before_block: Any) -> None:
         """查核中間資金池之較早資金池關聯（虛線）與原生 POL 供資關聯（點線）。"""
@@ -1515,7 +1752,8 @@ class Analyzer:
                     result.summary.append(
                         f"上游命中交易所公開標籤：{label}；來源資產：{item['amount']} {item['token']}；Tx：{item['hash']}"
                     )
-                frontier.append((item["from"], hop + 1, event_timestamp(item["time"])))
+                else:
+                    frontier.append((item["from"], hop + 1, event_timestamp(item["time"])))
 
     def _append_bnb_upstream(self, result: AnalysisResult, details: dict[str, Any], max_hops: int) -> None:
         """以免金鑰 BNBScan 還原 Relay 前的穩定幣兌換與原生 BNB 入金。"""

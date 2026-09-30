@@ -142,6 +142,102 @@ class TestPhase1AndPhase2(unittest.TestCase):
         self.assertEqual(ctrl.settings.max_hops, 3)
         self.assertEqual(ctrl.settings.max_history_pages, 12)
 
+    def test_inspect_initial_gas_funder(self):
+        provider = MagicMock()
+        provider.settings = Settings()
+        provider.address_native_transfers_before.return_value = [
+            {
+                "hash": "0xgas_tx",
+                "from": {"hash": "0xokx_hot", "name": "OKX 180"},
+                "to": {"hash": "0xeoa_target"},
+                "value": "15.5",
+                "timestamp": "2024-05-10T10:00:00Z",
+                "block_number": 50000000,
+            }
+        ]
+        provider.transaction_details.return_value = None
+        analyzer = Analyzer(provider)
+        res = AnalysisResult(query="0xeoa_target")
+
+        hit = analyzer._inspect_initial_gas_funder(res, "0xeoa_target", cutoff=1800000000, hop=2)
+        self.assertTrue(hit)
+        self.assertEqual(len(res.steps), 1)
+        step = res.steps[0]
+        self.assertEqual(step.direction, "手續費供資")
+        self.assertEqual(step.classification, "交易所")
+        self.assertEqual(step.line_style, "dotted")
+        self.assertIn("OKX", step.label)
+
+        # 檢驗函調清單提煉是否成功納入此手續費開戶來源
+        cands = build_subpoena_candidates(res)
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0].service_provider, "OKX")
+        self.assertEqual(cands[0].inquiry_value, "可函調 KYC")
+        self.assertEqual(cands[0].association_level, "輔助線索")
+        self.assertIn("手續費出資來源", cands[0].limitations)
+
+    def test_append_eoa_recursive_upstream(self):
+        provider = MagicMock()
+        provider.settings = Settings()
+        # 無原生 POL
+        provider.address_native_transfers_before.return_value = []
+        
+        # eoa_1 收到 eoa_2 轉帳 100 USDC
+        def mock_transfers(addr, max_pages=3):
+            if addr == "0xeoa_1":
+                return [{
+                    "transaction_hash": "0xtx_1",
+                    "from": {"hash": "0xeoa_2"},
+                    "to": {"hash": "0xeoa_1"},
+                    "timestamp": "2024-05-12T10:00:00Z",
+                    "token": {"symbol": "USDC", "decimals": 6},
+                    "total": {"value": "100000000"},
+                }]
+            elif addr == "0xeoa_2":
+                return [{
+                    "transaction_hash": "0xtx_2",
+                    "from": {"hash": "0xbinance_hot", "name": "Binance: Hot Wallet"},
+                    "to": {"hash": "0xeoa_2"},
+                    "timestamp": "2024-05-11T10:00:00Z",
+                    "token": {"symbol": "USDC", "decimals": 6},
+                    "total": {"value": "100000000"},
+                }]
+            return []
+
+        provider.address_token_transfers.side_effect = mock_transfers
+        analyzer = Analyzer(provider)
+        res = AnalysisResult(query="0xpoly_target")
+
+        analyzer._append_eoa_recursive_upstream(
+            res,
+            eoa_address="0xeoa_1",
+            cutoff=1800000000,
+            current_hop=2,
+            max_hops=4,
+            expected_token="USDC",
+        )
+
+        # 應有 2 步：eoa_2 -> eoa_1 (hop 2)，以及 binance -> eoa_2 (hop 3)
+        self.assertEqual(len(res.steps), 2)
+        step_eoa2 = res.steps[0]
+        step_binance = res.steps[1]
+
+        self.assertEqual(step_eoa2.hop, 2)
+        self.assertEqual(step_eoa2.from_address, "0xeoa_2")
+        self.assertEqual(step_eoa2.classification, "非託管個人錢包")
+
+        self.assertEqual(step_binance.hop, 3)
+        self.assertEqual(step_binance.from_address, "0xbinance_hot")
+        self.assertEqual(step_binance.classification, "交易所")
+        self.assertIn("Binance", step_binance.label)
+
+        # 檢驗函調清單：命中幣安為 [可函調 KYC]，eoa_2 為 [僅供上游追蹤]
+        cands = build_subpoena_candidates(res)
+        self.assertEqual(len(cands), 2)
+        binance_cand = next(c for c in cands if c.service_provider == "Binance")
+        self.assertEqual(binance_cand.inquiry_value, "可函調 KYC")
+        self.assertEqual(binance_cand.association_level, "逐筆本金")
+
 
 if __name__ == "__main__":
     unittest.main()
