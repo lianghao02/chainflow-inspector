@@ -13,17 +13,17 @@
     <div class="brand">
       <span class="brand-icon">🛡️</span>
       <span class="brand-title">Chain Fund Tracer</span>
-      <span class="brand-subtitle">Polymarket 資金鏈穿透與 VASP 法證查核</span>
+      <span class="brand-subtitle">公開鏈上資料採集・診斷・Agent 分析包</span>
     </div>
     <div class="header-actions">
       <!-- 歷史紀錄快照下拉選單 -->
-      <select id="historySelect" style="width: 260px;">
+      <select aria-label="載入歷史快照" id="historySelect" style="width: 260px;">
         <option value="">-- 載入歷史紀錄快照 --</option>
       </select>
 
       <!-- 整合匯出下拉選單 -->
       <div class="dropdown">
-        <button type="button" class="primary" id="exportDropdownBtn">📥 匯出法證文件 ▾</button>
+        <button type="button" class="primary" id="exportDropdownBtn">其他匯出 ▾</button>
         <div class="dropdown-menu" id="exportDropdownMenu">
           <button type="button" class="dropdown-item" data-export="agent_bundle" style="color:#38bdf8; font-weight:600;">🤖 匯出 Agent 分析包 ZIP (推薦)</button>
           <button type="button" class="dropdown-item" data-export="zip">📦 完整證據包 ZIP (含 SHA-256)</button>
@@ -36,7 +36,103 @@
     </div>
   </header>
 
-  <!-- 本案初步結論摘要橫幅 -->
+  <nav class="workspace-nav" aria-label="工作區">
+    <button type="button" class="workspace-tab active" data-workspace="collect" aria-pressed="true">採集與匯出</button>
+    <button type="button" class="workspace-tab" data-workspace="graph" aria-pressed="false">金流檢視</button>
+    <button type="button" class="workspace-tab" data-workspace="data" aria-pressed="false">資料與診斷</button>
+  </nav>
+  <div id="operationNotice" class="operation-notice" role="status" aria-live="polite" hidden></div>
+  <main class="workspace-body">
+  <section id="workspace-collect" class="workspace active" aria-label="採集與匯出">
+    <div class="collection-layout">
+    <!-- 左欄：輸入與參數設定 -->
+    <div class="left-pane">
+      <div class="pane-section">
+        <div class="pane-section-title">案件與追蹤目標</div>
+        <div class="form-group">
+          <label for="queryInput">Polygon 地址或交易雜湊</label>
+          <input type="text" id="queryInput" placeholder="0x... 或貼上 PolygonScan 網址" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="modeSelect">分析模式</label>
+          <select id="modeSelect">
+            <option value="polymarket">Polymarket 資金鏈穿透（推薦）</option>
+            <option value="general">一般地址／交易圖譜追蹤</option>
+          </select>
+        </div>
+      </div>
+
+      <details class="pane-section advanced-options"><summary>進階設定：時間、CSV 與追蹤深度</summary>
+        <div class="pane-section-title">時間範圍與歷史索引</div>
+        <div class="form-group">
+          <label for="timeInput">歷史時間錨定（UTC+8）</label>
+          <input type="text" id="timeInput" placeholder="例如：2024-05-15 或 2024-05-15 14:30">
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 3px;">
+            鎖定該時間之前的資金流，排除之後的高頻無關金流。
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="csvInput">匯入 PolygonScan 歷史 CSV 索引</label>
+          <div class="csv-picker-box">
+            <input type="text" id="csvInput" placeholder="尚未選取 CSV 檔案" readonly>
+            <button type="button" id="selectCsvBtn">瀏覽...</button>
+          </div>
+          <div id="csvBadge" class="csv-status-badge"></div>
+        </div>
+
+        <div class="form-group">
+          <label for="hopsSelect">追蹤深度 (跳數)</label>
+          <select id="hopsSelect">
+            <option value="1">1 跳（直接入金）</option>
+            <option value="2" selected>2 跳（穿透跨鏈與前手）</option>
+            <option value="3">3 跳（深度關聯）</option>
+            <option value="4">4 跳</option>
+          </select>
+        </div>
+
+      </details>
+      <div class="pane-section">        <div class="action-buttons">
+          <button type="button" id="startBtn" class="primary">開始採集</button>
+          <button type="button" id="stopBtn" class="danger" style="display: none;">🛑 停止查詢</button>
+        </div>
+      </div>
+    </div>
+<div class="collection-overview">
+      <div class="collection-heading"><div><h1>鏈上資料採集</h1><p>確認取得的紀錄與資料限制，再匯出給 Agent 分析。</p></div><span id="collectionState" class="state-label">尚未查詢</span></div>
+      <div class="query-meta"><span>本次目標</span><strong id="collectionTarget">尚未指定</strong></div>
+      <div class="progress-panel" role="status" aria-live="polite"><span id="collectionProgress">輸入地址或交易雜湊，開始採集公開鏈上紀錄。</span><span id="previousResultHint" hidden>目前顯示上次結果；新查詢仍在進行。</span></div>
+      <div class="collection-counts" id="collectionCounts">
+        <article><span>主鏈交易</span><strong id="colTransactions">—</strong><small id="colTransactionsStatus">待查詢</small></article>
+        <article><span>代幣轉帳</span><strong id="colTransfers">—</strong><small id="colTransfersStatus">待查詢</small></article>
+        <article><span>內部交易</span><strong id="colInternal">—</strong><small id="colInternalStatus">待查詢</small></article>
+        <article><span>合約日誌</span><strong id="colLogs">—</strong><small id="colLogsStatus">待查詢</small></article>
+      </div>
+      <div id="collectionWarnings" class="collection-warnings">尚未取得資料。查詢完成後會顯示失敗、分頁截斷與未採集項目。</div>
+      <div class="collection-export"><div><h2>交給 Agent 接續分析</h2><p>ZIP 包含資料清冊、原始紀錄、診斷日誌與分析提示詞。</p></div><button type="button" class="primary" data-export="agent_bundle" disabled>匯出 Agent 分析包 ZIP</button></div>
+      <div class="pane-section" style="flex: 1; overflow-y: auto;">
+        <div class="pane-section-title">4 軌核心資產檢索狀態</div>
+        <div id="trackBadgesGrid" class="track-badges-grid">
+          <div class="track-badge-card" id="badge-usdc">
+            <div class="track-badge-header"><span>USDC</span><span class="track-badge-status ok" id="status-usdc">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdc">Native USDC</div>
+          </div>
+          <div class="track-badge-card" id="badge-usdce">
+            <div class="track-badge-header"><span>USDC.e</span><span class="track-badge-status ok" id="status-usdce">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdce">Bridged USDC</div>
+          </div>
+          <div class="track-badge-card" id="badge-pusd">
+            <div class="track-badge-header"><span>pUSD</span><span class="track-badge-status ok" id="status-pusd">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-pusd">Polymarket USD</div>
+          </div>
+          <div class="track-badge-card" id="badge-usdt">
+            <div class="track-badge-header"><span>USDT</span><span class="track-badge-status ok" id="status-usdt">待查詢</span></div>
+            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdt">Tether USD</div>
+          </div>
+        </div>
+      </div>
+</div></div></section>
+<section id="workspace-graph" class="workspace" aria-label="金流檢視" hidden>  <!-- 本案初步結論摘要橫幅 -->
   <div class="summary-banner" id="summaryBanner">
     <div class="summary-title">
       <span>🛡️ 本案初步結論</span>
@@ -65,8 +161,51 @@
     </div>
   </div>
 
-  <!-- 涉案賭客行為畫像與雙向調證卡片 (Suspect Profile & Subpoena Strategy Card) -->
-  <div class="suspect-profile-card" id="suspectProfileCard" style="display: none;">
+<div class="graph-layout">    <!-- 中欄：可互動 SVG 資金圖 -->
+    <div class="center-pane">
+      <div class="graph-toolbar">
+        <div class="filter-pills">
+          <button class="pill-btn active" data-filter="verified">查核主線</button>
+          <button class="pill-btn" data-filter="all">全部金流</button>
+          <button class="pill-btn" data-filter="principal">⚡ 唯一配對本金</button>
+          <button class="pill-btn" data-filter="relay">🌉 跨鏈／Relay</button>
+          <button class="pill-btn" data-filter="pool">💧 資金池關聯 (虛線)</button>
+          <button class="pill-btn" data-filter="internal">🎯 平台內部／下注</button>
+          <button class="pill-btn" data-filter="outflow">📤 出金</button>
+        </div>
+        <div>
+          <button id="resetViewBtn" style="padding: 3px 8px; font-size: 11px;">🔍 重設視野</button>
+        </div>
+      </div>
+
+      <!-- 圖例列 -->
+      <div class="legend-bar">
+        <span style="font-weight:600; color:var(--text-primary); margin-right:4px;">圖例：</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#fbbf24;"></span> 🏛️ 交易所</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#c084fc;"></span> 🌉 跨鏈／Bridge</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#38bdf8;"></span> 🎯 Polymarket</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#64748b;"></span> 👛 外部個人錢包</span>
+        <span class="legend-item"><span class="legend-color-box" style="background:#34d399;"></span> ⭐ 目標錢包</span>
+      </div>
+
+      <div class="graph-viewport">
+        <svg id="flowSvg"></svg>
+      </div>
+    </div>
+
+    <!-- 右欄：法證詳情卡片 -->
+    <div class="right-pane">
+      <div class="detail-header">
+        <h3>鏈上證據詳情</h3><button type="button" id="closeDetailBtn" aria-label="關閉證據詳情">關閉</button>
+      </div>
+      <div class="detail-body" id="detailBody">
+        <div class="detail-empty">點選中間圖譜的箭頭或節點<br>檢視完整法證核對數據</div>
+      </div>
+    </div>
+
+</div></section>
+<section id="workspace-data" class="workspace" aria-label="資料與診斷" hidden>  <!-- 涉案賭客行為畫像與雙向調證卡片 (Suspect Profile & Subpoena Strategy Card) -->
+  <details class="suspect-profile-card" id="suspectProfileCard" style="display: none;"><summary>啟發式線索與調證參考（展開檢視）</summary>
     <div class="profile-card-top">
       <div class="profile-badge-row">
         <span class="profile-badge" id="profBadge">【涉案賭客資金畫像分析中】</span>
@@ -117,158 +256,34 @@
         <span class="strategy-text muted" id="profLimits">—</span>
       </div>
     </div>
-  </div>
-
-  <!-- 主三欄工作台 -->
-  <div class="main-container">
-
-    <!-- 左欄：輸入與參數設定 -->
-    <div class="left-pane">
-      <div class="pane-section">
-        <div class="pane-section-title">案件與追蹤目標</div>
-        <div class="form-group">
-          <label for="queryInput">Polygon 地址或下注交易雜湊</label>
-          <input type="text" id="queryInput" placeholder="0x... 或貼上 PolygonScan 網址" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="form-group">
-          <label for="modeSelect">分析模式</label>
-          <select id="modeSelect">
-            <option value="polymarket">Polymarket 資金鏈穿透（推薦）</option>
-            <option value="general">一般地址／交易圖譜追蹤</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="pane-section">
-        <div class="pane-section-title">時間範圍與歷史索引</div>
-        <div class="form-group">
-          <label for="timeInput">歷史時間錨定（UTC+8）</label>
-          <input type="text" id="timeInput" placeholder="例如：2024-05-15 或 2024-05-15 14:30">
-          <div style="font-size: 10px; color: var(--text-muted); margin-top: 3px;">
-            鎖定該時間之前的資金流，排除之後的高頻無關金流。
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="csvInput">匯入 PolygonScan 歷史 CSV 索引</label>
-          <div class="csv-picker-box">
-            <input type="text" id="csvInput" placeholder="尚未選取 CSV 檔案" readonly>
-            <button type="button" id="selectCsvBtn">瀏覽...</button>
-          </div>
-          <div id="csvBadge" class="csv-status-badge"></div>
-        </div>
-
-        <div class="form-group">
-          <label for="hopsSelect">追蹤深度 (跳數)</label>
-          <select id="hopsSelect">
-            <option value="1">1 跳（直接入金）</option>
-            <option value="2" selected>2 跳（穿透跨鏈與前手）</option>
-            <option value="3">3 跳（深度關聯）</option>
-            <option value="4">4 跳</option>
-          </select>
-        </div>
-
-        <div class="action-buttons">
-          <button type="button" id="startBtn" class="primary">🚀 開始法證追查</button>
-          <button type="button" id="stopBtn" class="danger" style="display: none;">🛑 停止查詢</button>
-        </div>
-      </div>
-
-      <div class="pane-section" style="flex: 1; overflow-y: auto;">
-        <div class="pane-section-title">4 軌核心資產檢索狀態</div>
-        <div id="trackBadgesGrid" class="track-badges-grid">
-          <div class="track-badge-card" id="badge-usdc">
-            <div class="track-badge-header"><span>USDC</span><span class="track-badge-status ok" id="status-usdc">待查詢</span></div>
-            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdc">Native USDC</div>
-          </div>
-          <div class="track-badge-card" id="badge-usdce">
-            <div class="track-badge-header"><span>USDC.e</span><span class="track-badge-status ok" id="status-usdce">待查詢</span></div>
-            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdce">Bridged USDC</div>
-          </div>
-          <div class="track-badge-card" id="badge-pusd">
-            <div class="track-badge-header"><span>pUSD</span><span class="track-badge-status ok" id="status-pusd">待查詢</span></div>
-            <div style="font-size: 10px; color: var(--text-muted);" id="sub-pusd">Polymarket USD</div>
-          </div>
-          <div class="track-badge-card" id="badge-usdt">
-            <div class="track-badge-header"><span>USDT</span><span class="track-badge-status ok" id="status-usdt">待查詢</span></div>
-            <div style="font-size: 10px; color: var(--text-muted);" id="sub-usdt">Tether USD</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 中欄：可互動 SVG 資金圖 -->
-    <div class="center-pane">
-      <div class="graph-toolbar">
-        <div class="filter-pills">
-          <button class="pill-btn active" data-filter="verified">查核主線</button>
-          <button class="pill-btn" data-filter="all">全部金流</button>
-          <button class="pill-btn" data-filter="principal">⚡ 唯一配對本金</button>
-          <button class="pill-btn" data-filter="relay">🌉 跨鏈／Relay</button>
-          <button class="pill-btn" data-filter="pool">💧 資金池關聯 (虛線)</button>
-          <button class="pill-btn" data-filter="internal">🎯 平台內部／下注</button>
-          <button class="pill-btn" data-filter="outflow">📤 出金</button>
-        </div>
-        <div>
-          <button id="resetViewBtn" style="padding: 3px 8px; font-size: 11px;">🔍 重設視野</button>
-        </div>
-      </div>
-
-      <!-- 圖例列 -->
-      <div class="legend-bar">
-        <span style="font-weight:600; color:var(--text-primary); margin-right:4px;">圖例：</span>
-        <span class="legend-item"><span class="legend-color-box" style="background:#fbbf24;"></span> 🏛️ 交易所</span>
-        <span class="legend-item"><span class="legend-color-box" style="background:#c084fc;"></span> 🌉 跨鏈／Bridge</span>
-        <span class="legend-item"><span class="legend-color-box" style="background:#38bdf8;"></span> 🎯 Polymarket</span>
-        <span class="legend-item"><span class="legend-color-box" style="background:#64748b;"></span> 👛 外部個人錢包</span>
-        <span class="legend-item"><span class="legend-color-box" style="background:#34d399;"></span> ⭐ 目標錢包</span>
-      </div>
-
-      <div class="graph-viewport">
-        <svg id="flowSvg"></svg>
-      </div>
-    </div>
-
-    <!-- 右欄：法證詳情卡片 -->
-    <div class="right-pane">
-      <div class="detail-header">
-        <h3>📋 鏈上證據詳情</h3>
-      </div>
-      <div class="detail-body" id="detailBody">
-        <div class="detail-empty">點選中間圖譜的箭頭或節點<br>檢視完整法證核對數據</div>
-      </div>
-    </div>
-
-  </div>
-
+  </details>
   <!-- 底欄：6 大資料頁籤抽屜 -->
   <div class="drawer-container" id="bottomDrawer">
-    <div class="drawer-tabs">
-      <div class="drawer-tab active" data-tab="subpoena">
+    <div class="drawer-tabs" aria-label="資料分類"><button type="button" class="drawer-tab active" data-tab="collection">採集診斷</button>
+      <button type="button" class="drawer-tab" data-tab="subpoena">
         🏛️ 可函調服務商 <span class="drawer-tab-count" id="countSubpoena">0</span>
-      </div>
-      <div class="drawer-tab" data-tab="upstream">
+      </button>
+      <button type="button" class="drawer-tab" data-tab="upstream">
         🔍 上游追查節點 <span class="drawer-tab-count" id="countUpstream">0</span>
-      </div>
-      <div class="drawer-tab" data-tab="inbound">
+      </button>
+      <button type="button" class="drawer-tab" data-tab="inbound">
         🛣️ 入金路徑 <span class="drawer-tab-count" id="countInbound">0</span>
-      </div>
-      <div class="drawer-tab" data-tab="betting">
+      </button>
+      <button type="button" class="drawer-tab" data-tab="betting">
         🎯 投注解碼 <span class="drawer-tab-count" id="countBetting">0</span>
-      </div>
-      <div class="drawer-tab" data-tab="audit">
+      </button>
+      <button type="button" class="drawer-tab" data-tab="audit">
         📜 查詢狀態與稽核軌道 <span class="drawer-tab-count" id="countAudit">0</span>
-      </div>
-      <div class="drawer-tab" data-tab="report">
+      </button>
+      <button type="button" class="drawer-tab" data-tab="report">
         📄 法證文字報告
-      </div>
-      <div class="drawer-toggle-btn" id="toggleDrawerBtn" title="展開 / 收合底欄">
-        ⮁ 收合／展開
-      </div>
+      </button>
+
     </div>
 
+<div class="drawer-content active" id="tab-collection"><div class="diagnostic-intro"><h2>資料可用性與採集診斷</h2><p>未成功取得資料與成功零筆分開呈現；分頁截斷會保留已取得紀錄。</p></div><table class="data-table" id="availabilityTable"><thead><tr><th>資料類型</th><th>狀態</th><th>取得筆數</th><th>完成分頁</th><th>來源與限制</th></tr></thead><tbody><tr><td colspan="5">尚未查詢。</td></tr></tbody></table><div class="diagnostic-intro"><h2>採集日誌</h2><pre id="diagnosticText">尚無採集紀錄。</pre></div></div>
     <!-- Tab 1: 可函調服務商 (高優先展示真實 CEX/法幣等 KYC 終點) -->
-    <div class="drawer-content active" id="tab-subpoena">
+    <div class="drawer-content" id="tab-subpoena">
       <table class="data-table" id="subpoenaTable">
         <thead>
           <tr>
@@ -374,13 +389,14 @@
   </div>
   </div>
 
+</section></main>
   <!-- 底部狀態列 -->
   <div class="status-bar">
     <div class="status-indicator">
       <div class="status-dot" id="statusDot"></div>
       <span id="statusText">系統已就緒</span>
     </div>
-    <div id="netStatus" style="font-size: 10px;">Polygon RPC: 在線 ｜ Explorer: 在線 ｜ Relay Index: 在線</div>
+    <div id="netStatus" style="font-size: 10px;">來源可用性與限制請查看「採集診斷」</div>
   </div>
 
   <!-- 引用腳本 -->

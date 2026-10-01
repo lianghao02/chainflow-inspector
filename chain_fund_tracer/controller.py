@@ -21,6 +21,17 @@ from .models import AnalysisResult
 from .providers import PolygonProvider, ProviderError
 
 
+def dialog_path(selection: Any) -> str:
+    """統一不同原生後端回傳的單一路徑或路徑清單。"""
+    if isinstance(selection, (tuple, list)):
+        selection = selection[0] if selection else None
+    if selection is None or selection == "":
+        return ""
+    if not isinstance(selection, (str, Path)):
+        raise ValueError("檔案對話框未回傳有效路徑")
+    return str(selection)
+
+
 class Controller:
     """PyWebView JavaScript API 協調控制器。
     負責前端事件呼叫、背景查詢執行緒、進度回報、取消與檔案對話框。
@@ -109,9 +120,7 @@ class Controller:
             allow_multiple=False,
             file_types=file_types,
         )
-        if result and len(result) > 0:
-            return str(result[0])
-        return ""
+        return dialog_path(result)
 
     def inspect_csv(self, csv_path: str, target_address: str = "") -> dict[str, Any]:
         """對使用者選取的 CSV 進行法證規格與時間窗預檢。"""
@@ -270,17 +279,14 @@ class Controller:
             return {"success": False, "error": f"不支援的匯出格式：{export_type}"}
 
         default_filename, file_types = configs[export_type]
-        save_path = self._window.create_file_dialog(
-            webview.SAVE_DIALOG,
-            save_filename=default_filename,
-            file_types=file_types,
-        )
-
-        if not save_path:
-            return {"success": False, "cancelled": True}
-
-        dest = str(save_path)
         try:
+            dest = dialog_path(self._window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=default_filename,
+                file_types=file_types,
+            ))
+            if not dest:
+                return {"success": False, "cancelled": True}
             if export_type == "csv":
                 export_csv(self._current_result, dest)
             elif export_type == "txt":
@@ -295,7 +301,7 @@ class Controller:
                 export_agent_bundle(self._current_result, dest)
             return {"success": True, "file_path": dest}
         except Exception as exc:
-            return {"success": False, "error": f"匯出失敗：{exc}"}
+            return {"success": False, "error": f"無法儲存檔案：{exc}；請選擇可寫入的資料夾後重試。"}
 
     # ==========================
     # 外部工具輔助（嚴格白名單防護）

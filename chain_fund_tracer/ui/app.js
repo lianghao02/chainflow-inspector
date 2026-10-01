@@ -6,12 +6,15 @@
 let flowGraph = null;
 let currentResult = null;
 let currentSettings = {};
+let analysisRunning = false;
+let exportRunning = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   const svgEl = document.getElementById('flowSvg');
-  flowGraph = new FlowGraph(svgEl, renderStepDetail);
+  flowGraph = new FlowGraph(svgEl, (step) => renderStepDetail(step, true));
 
   initEventListeners();
+  syncExportButtons();
 
   // 等待 pywebview API 準備完畢
   if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_init_data === 'function') {
@@ -37,14 +40,94 @@ async function onPyWebViewReady() {
   }
 }
 
-function updateStatus(text, isBusy) {
+function updateStatus(text, isBusy, isError = false) {
   const statusText = document.getElementById('statusText');
   const statusDot = document.getElementById('statusDot');
   if (statusText) statusText.textContent = text;
   if (statusDot) {
+    statusDot.classList.toggle('error', isError);
     if (isBusy) statusDot.classList.add('busy');
     else statusDot.classList.remove('busy');
   }
+  document.getElementById('collectionProgress').textContent = text;
+  document.querySelector('.progress-panel').classList.toggle('busy', isBusy);
+}
+
+function showNotice(text, isError = false) {
+  const notice = document.getElementById('operationNotice');
+  notice.hidden = !text;
+  notice.textContent = text;
+  notice.classList.toggle('error', isError);
+}
+
+function syncExportButtons() {
+  document.querySelectorAll('[data-export]').forEach((button) => {
+    button.disabled = !currentResult || analysisRunning || exportRunning;
+  });
+}
+
+function switchWorkspace(name) {
+  document.querySelectorAll('[data-workspace]').forEach((button) => {
+    const active = button.dataset.workspace === name;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  document.querySelectorAll('.workspace').forEach((panel) => {
+    const active = panel.id === `workspace-${name}`;
+    panel.hidden = !active;
+    panel.classList.toggle('active', active);
+  });
+  if (name === 'graph') requestAnimationFrame(() => flowGraph.fitToView(flowGraph.render()));
+}
+
+function setAnalysisRunning(running) {
+  analysisRunning = running;
+  ['queryInput', 'modeSelect', 'timeInput', 'hopsSelect', 'selectCsvBtn', 'historySelect'].forEach((id) => {
+    document.getElementById(id).disabled = running;
+  });
+  document.getElementById('startBtn').style.display = running ? 'none' : 'inline-flex';
+  document.getElementById('stopBtn').style.display = running ? 'inline-flex' : 'none';
+  document.getElementById('previousResultHint').hidden = !running || !currentResult;
+  syncExportButtons();
+}
+
+const availabilityNames = {Success: '已取得', NoResults: '查詢成功，零筆', IncompletePagination: '歷史分頁截斷', RateLimited: '查詢限流', Timeout: '查詢逾時', ParseError: '解析失敗', ProviderUnavailable: '來源不可用', UnsupportedProvider: '未採集／來源未支援'};
+
+function hasCollectionLimits(data) {
+  const statuses = data.availabilities || {};
+  return ['transactions', 'token_transfers', 'internal_transactions', 'contract_logs'].some((key) => {
+    const info = statuses[key] || (key === 'contract_logs' ? statuses.logs : null);
+    return !info || !info.available || !info.is_complete;
+  });
+}
+
+function renderCollectionOverview(data) {
+  const types = [
+    ['transactions', '主鏈交易', 'colTransactions', (data.transactions || []).length],
+    ['token_transfers', '代幣轉帳', 'colTransfers', (data.flow_events || []).filter((e) => e.event_type === 'token_transfer').length || (data.transfers || []).length],
+    ['internal_transactions', '內部交易', 'colInternal', (data.internal_transactions || []).length],
+    ['logs', '合約日誌', 'colLogs', (data.contract_logs || []).length],
+  ];
+  const availabilities = data.availabilities || {};
+  const problems = [];
+  const tbody = document.querySelector('#availabilityTable tbody');
+  tbody.textContent = '';
+  types.forEach(([key, label, id, count]) => {
+    const info = availabilities[key] || (key === 'logs' ? availabilities.contract_logs : null);
+    const state = info ? (availabilityNames[info.status] || info.status) : (count ? '已有紀錄，完整性未記錄' : '未記錄查詢狀態');
+    document.getElementById(id).textContent = (!info || !info.available) && count === 0 ? '—' : count.toLocaleString('zh-TW');
+    document.getElementById(`${id}Status`).textContent = state;
+    if (!info || !info.available || !info.is_complete) problems.push(`${label}：${state}`);
+    const tr = document.createElement('tr');
+    [label, state, document.getElementById(id).textContent, info ? `${info.pages_scanned || 0} 頁／${info.is_complete ? '完成' : '未完成'}` : '未記錄', info ? [info.provider, info.error_message].filter(Boolean).join('；') || '未提供來源資訊' : '歷史快照未保存可用性清冊'].forEach((value) => tr.appendChild(createTextElement('td', value)));
+    tbody.appendChild(tr);
+  });
+  document.getElementById('collectionTarget').textContent = data.query || '未提供';
+  document.getElementById('collectionState').textContent = data.analysis_status === 'failed' ? '採集失敗' : data.analysis_status === 'partial' || problems.length ? '採集完成，含資料限制' : '範圍內採集完成';
+  const warnings = document.getElementById('collectionWarnings');
+  warnings.textContent = [...problems, ...(data.warnings || [])].join('\n') || '已記錄各資料類型的採集狀態；此結果仍受查詢範圍限制。';
+  warnings.classList.toggle('warn', Boolean(problems.length || (data.warnings || []).length));
+  document.getElementById('diagnosticText').textContent = (data.diagnostic_logs || []).join('\n') || '此快照未保存採集診斷日誌。';
 }
 
 // ==========================
@@ -122,6 +205,8 @@ function createAddressLink(address, chainId = 137, label = '') {
 // ==========================
 
 function initEventListeners() {
+  document.querySelectorAll('[data-workspace]').forEach((button) => button.addEventListener('click', () => switchWorkspace(button.dataset.workspace)));
+  document.getElementById('closeDetailBtn').addEventListener('click', () => document.querySelector('.graph-layout').classList.remove('detail-open'));
   // 開始追查
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
@@ -147,7 +232,7 @@ function initEventListeners() {
 
   // 重設視角
   document.getElementById('resetViewBtn').addEventListener('click', () => {
-    flowGraph.fitToView();
+    flowGraph.fitToView(flowGraph.render());
   });
 
   // 匯出下拉選單
@@ -166,23 +251,30 @@ function initEventListeners() {
   // 匯出項目點擊
   document.querySelectorAll('[data-export]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
+      if (!currentResult || analysisRunning || exportRunning) return;
       const exportType = btn.getAttribute('data-export');
       if (exportMenu) exportMenu.classList.remove('show');
+      exportRunning = true;
+      syncExportButtons();
+      showNotice('');
       try {
         updateStatus(`正在匯出 ${exportType}…`, true);
         const res = await window.pywebview.api.export_report(exportType);
         if (res.success) {
-          alert(`匯出成功！\n儲存路徑：${res.file_path}`);
+          showNotice(`匯出完成：${res.file_path}`);
           updateStatus('匯出完成', false);
         } else if (!res.cancelled) {
-          alert(`匯出失敗：${res.error}`);
-          updateStatus('匯出失敗', false);
+          showNotice(res.error || '匯出失敗，請選擇可寫入的資料夾後重試。', true);
+          updateStatus('匯出失敗；分析結果仍可重試匯出', false, true);
         } else {
           updateStatus('已取消匯出', false);
         }
       } catch (err) {
-        alert(`匯出異常：${err}`);
-        updateStatus('匯出異常', false);
+        showNotice(`匯出異常：${err}；請重試匯出。`, true);
+        updateStatus('匯出異常', false, true);
+      } finally {
+        exportRunning = false;
+        syncExportButtons();
       }
     });
   });
@@ -206,10 +298,6 @@ function initEventListeners() {
   });
 
   // 底欄收合/展開
-  document.getElementById('toggleDrawerBtn').addEventListener('click', () => {
-    const drawer = document.getElementById('bottomDrawer');
-    drawer.classList.toggle('collapsed');
-  });
 }
 
 // ==========================
@@ -245,6 +333,7 @@ function cleanInputQuery(val) {
 }
 
 async function handleStartTrace() {
+  if (analysisRunning || exportRunning) return;
   const queryRaw = document.getElementById('queryInput').value;
   const query = cleanInputQuery(queryRaw);
   if (!query) {
@@ -262,9 +351,11 @@ async function handleStartTrace() {
     return;
   }
 
-  document.getElementById('startBtn').style.display = 'none';
-  document.getElementById('stopBtn').style.display = 'inline-flex';
-  updateStatus('正在進行鏈上法證追蹤…', true);
+  setAnalysisRunning(true);
+  switchWorkspace('collect');
+  showNotice('');
+  document.getElementById('collectionState').textContent = '採集中';
+  updateStatus('正在採集鏈上紀錄…', true);
 
   try {
     const res = await window.pywebview.api.run_analysis({
@@ -282,20 +373,21 @@ async function handleStartTrace() {
       if (resultStatus === 'partial') {
         updateStatus('分析部分完成', false);
       } else if (resultStatus === 'failed') {
-        updateStatus('核心資產軌道查詢失敗', false);
+        updateStatus('核心資產軌道查詢失敗', false, true);
       } else {
-        updateStatus('分析完成', false);
+        updateStatus(hasCollectionLimits(res.data) ? '採集完成，含資料限制' : '範圍內採集完成', false);
       }
     } else {
-      alert(`分析失敗：${res.error || '未知錯誤'}`);
-      updateStatus('分析中斷或失敗', false);
+      showNotice(`採集中斷：${res.error || '未知錯誤'}；可調整查詢範圍後重試。${currentResult ? '畫面保留上次結果。' : ''}`, true);
+      document.getElementById('collectionState').textContent = '採集中斷或失敗';
+      updateStatus('採集中斷或失敗', false, true);
     }
   } catch (err) {
-    alert(`執行異常：${err}`);
-    updateStatus('系統異常', false);
+    showNotice(`執行異常：${err}；可重新查詢。${currentResult ? '畫面保留上次結果。' : ''}`, true);
+    document.getElementById('collectionState').textContent = '執行失敗';
+    updateStatus('系統異常', false, true);
   } finally {
-    document.getElementById('startBtn').style.display = 'inline-flex';
-    document.getElementById('stopBtn').style.display = 'none';
+    setAnalysisRunning(false);
   }
 }
 
@@ -313,6 +405,11 @@ async function handleStopTrace() {
 // ==========================
 
 function renderAllResults(data) {
+  currentResult = data;
+  renderCollectionOverview(data);
+  syncExportButtons();
+  document.querySelector('.graph-layout').classList.remove('detail-open');
+  document.getElementById('detailBody').textContent = '點選圖譜中的箭頭或節點，檢視該筆證據。';
   const steps = data.steps || [];
   const subpoenas = data.subpoena_candidates || [];
   const tracks = data.query_tracks || {};
@@ -441,13 +538,16 @@ function renderSummaryBanner(data, kycCandidates, upstreamCandidates, steps) {
   const tracks = data.query_tracks || {};
   const incomplete = data.incomplete_tracks || [];
   if (status === 'failed') {
-    trackEl.textContent = `資料不完整（${incomplete.length} 項失敗）`;
+    trackEl.textContent = incomplete.length ? `資料不完整（${incomplete.length} 項失敗）` : '採集失敗，詳見採集診斷';
     trackEl.style.color = '#f87171';
   } else if (status === 'partial') {
-    trackEl.textContent = `資料不完整（${incomplete.length} 項未完成）`;
+    trackEl.textContent = incomplete.length ? `資料不完整（${incomplete.length} 項未完成）` : '資料不完整，詳見採集診斷';
+    trackEl.style.color = '#fbbf24';
+  } else if (hasCollectionLimits(data)) {
+    trackEl.textContent = '含資料限制，詳見採集診斷';
     trackEl.style.color = '#fbbf24';
   } else {
-    trackEl.textContent = Object.keys(tracks).length ? '資料完整' : '未啟用核心資產軌道';
+    trackEl.textContent = Object.keys(tracks).length ? '範圍內採集完成' : '未啟用核心資產軌道';
     trackEl.style.color = '#34d399';
   }
 }
@@ -522,7 +622,8 @@ function selectDefaultPriorityStep(steps) {
 }
 
 // 渲染右欄法證詳情卡片（DOM 安全構建，防禦 XSS）
-function renderStepDetail(step) {
+function renderStepDetail(step, reveal = false) {
+  if (reveal) document.querySelector('.graph-layout').classList.add('detail-open');
   const container = document.getElementById('detailBody');
   if (!container) return;
   container.textContent = ''; // 清空
@@ -648,6 +749,8 @@ function renderKycTable(candidates) {
     const tdAmt = createTextElement('td', `${c.amount || '0'} ${c.asset || ''}`, 'mono');
     tdAmt.style.color = '#38bdf8';
     tdAmt.style.fontWeight = '600';
+
+    const tdTime = createTextElement('td', c.datetime_tw || '未收錄', 'mono');
 
     const isCashout = (c.service_type && c.service_type.includes('充值')) || c.association_level === '出金變現';
     const targetAddr = isCashout ? (c.to_address || c.from_address) : c.from_address;
