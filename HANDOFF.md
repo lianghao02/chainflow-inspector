@@ -1,47 +1,62 @@
 # HANDOFF
 
+## 核心元資料 (Metadata)
+- **Repository**：lianghao02/chainflow-inspector
+- **Branch**：main
+- **Commit SHA**：a63b39ce84288750986ac253c6314bd95b6055cb（本輪提交前基準；最新提交以 Git 記錄為準）
+- **Skill Version**：v1.0.0
+- **Task Type**：HANDOFF
+- **Local Path Hint**：15_chainflow-inspector
+
+---
+
 ## 目前狀態
-可交付；2026-10-01 已完成匯出路徑與工作台分層修正。
+開發環境修復已驗證；本輪不包含正式發布。
 
 ## 本輪目標
-修正使用者截圖中的匯出 Errno 22、tdTime 渲染中斷、結果卡片擠壓圖譜與表格文字碎裂；驗證後提交並推送 GitHub。
+依已授權計畫修復 Python 環境，保留既有功能與使用者資料。
 
-## 已完成
-- 原生檔案對話框的 tuple、list、字串與 Path 統一取出實際路徑；取消存檔及對話框錯誤皆回傳結構化結果。六種匯出格式與 CSV 選取共用處理。
-- 工作台分成採集與匯出、金流檢視、資料與診斷三個工作區。進階設定與啟發式調證參考預設收合；圖譜詳情於使用者點選後開啟。
-- 長表格提供水平捲動，時間、金額、地址與交易雜湊保留完整文字；補齊 tdTime 宣告與缺值替代文字。
-- 採集清冊區分成功零筆、失敗、未採集與分頁截斷；歷史快照缺少清冊時不宣稱資料完整。移除來源固定在線文字。
-- 查詢中停用輸入與匯出；匯出失敗可重試，查詢失敗明確提示畫面保留上次結果。
-- README 更新操作流程；新增原生對話框回傳與六格式實際寫檔回歸測試。
+## 基準與已確認事實 (Baseline & Confirmed Facts)
+上述 SHA 為修復前已存在的 HEAD。既有功能成果承接原版本，不重做或撤銷；詳細跨專案基準位於控制中心 docs/python-environment-repair/baseline.json。
 
-## 刻意未修改
-- 保留前輪 v1.6.0 採集器、FlowEvent、交易診斷、Agent 分析包與追蹤演算法。
-- 未引入前端框架或新增產品套件依賴；原始案件快照與本機設定未加入 Git。
+## 已完成 (Completed)
+2026-10-06 GitHub 同步交接：使用者已授權提交與推送前輪成果；本輪只提交已核對範圍。最新 Commit SHA、遠端同步與 CI 結果統一見控制中心 `docs/github-sync/RESULTS.md`，不將提交本身的 SHA 寫入同一份提交。 本輪補正 PowerShell 5.1 中文腳本編碼：僅增加 UTF-8 BOM，原內容位元組不變；29 個相關腳本在 5.1／7 語法檢查均通過，環境 CheckOnly 亦通過。
 
-## 尚未完成
-無本輪功能待辦；原生桌面視窗需重新啟動才能載入新腳本。
+2026-10-06 代表性驗收：隔離的合成歷史保存／還原相等，六格式匯出與 ZIP 完整性通過；socket.connect 被測試阻擋，沒有線上採集或正式案件歷史寫入。沒有變更產品程式或發布包；詳見中央 docs/new-build-acceptance/RESULTS.md。
 
-## 驗證結果
-### 已執行
-- Python 全套：147 passed、20 subtests passed（89.46 秒）。
-- 六格式實際匯出、ZIP 解包與 CRC、中文及空白資料夾、tuple/list/字串/Path、取消存檔、寫入與對話框失敗：通過。
-- app.js 的 Node 語法檢查：通過。
-- 內建 Browser 以本機歷史案件快照與隔離 API 替身驗證三工作區、查詢停用、八欄候選表格、完整時間、分頁截斷、查詢失敗保留結果、匯出失敗後成功重試：通過，無 console error。
-- 1280×720 圖譜工作區畫布高度約 446px，啟發式摘要不佔用圖譜高度。
-- 前輪真實五地址驗收已完成：轉帳 5／9／6／21／602 筆；第五地址主鏈交易 116 筆且標示分頁限制，本輪未重跑外部查詢。
-- Git 差異、工作範圍與敏感資料檢核：通過；臨時介面驗證資料僅保留本機，不提交。
+2026-10-05 README 文件更新：補齊專案概念、開發原因、典型流程、已知 Bug／限制及回報方式，並依實際入口校正必要操作說明。本次沒有修改產品程式、環境或個人資料，未 Commit／Push；前輪成果與既有待辦繼承。文件檢核與逐案索引由控制中心 docs/readme-refresh/RESULTS.md 彙整，不代表本次重新驗收全部功能。
 
-### 尚未驗證
-本輪未在使用者正在開啟的原生視窗操作存檔對話框；以相同 Controller 路徑實際寫檔測試驗證原生回傳型別。
+2026-10-05 目錄整理補充：清除 38 筆可與 test_gui 虛構指紋精確比對的歷史快照並過濾索引，其餘 12 筆索引逐欄位一致，其他快照/報告雜湊保持；原索引副本在中央忽略的 artifacts/layout-safety。三項 TemporaryDirectory 歷史測試、CheckOnly/pip check 通過。詳見中央 docs/project-layout/RESULTS.md，未 Commit/Push；避免在正式 history 重跑會寫入資料的 GUI 全套測試。
 
-### 已知風險
-舊快照可能缺少資料可用性清冊，介面會顯示未知／資料限制；Agent 與承辦人仍須核對鏈上證據與來源限制。
+建立 .venv 3.13.15，統一 run.bat／setup 入口，保留 pywebview 6.2.1／pythonnet 3.1.0；修正舊 <6 宣告及全域安裝指引。
+
+## 異動檔案 (Changed Files)
+run.bat、setup_and_run.ps1、requirements.txt、requirements-build.txt、app.py 的環境錯誤指引、README.md。
+
+## 刻意未修改 (Do Not Do / Deliberately Omitted)
+未變更全域 Python／PATH／全域套件、既有發布包、業務演算法或原始資料；未 Commit／Push。07 原有兩個檔案修改保留且已核對雜湊。
+
+## 尚未完成 (Remaining Work)
+- **P1 (阻斷/必須)**：無已確認的現行開發環境阻斷。
+- **P2 (重要/當次)**：本輪必要修復與驗證完成。
+- **P3 (改善建議/暫緩)**：舊發布包不會因來源修正自動更新；下一次發布另驗證乾淨電腦與隔離入口。全域套件及共用 cv2 去重另案處理。
+
+## 驗證結果 (Validation)
+### 已執行測試與結果
+147 項全套測試通過；pip check 與隔離副本原生主視窗啟動通過。採集、演算法、六格式匯出與案件資料邏輯不變。
+### 尚未驗證項目
+Win10／其他使用者／無全域 Python 電腦、完整原生介面互動、重新打包及正式更新切換，本輪未宣稱通過。
+### 已知風險 (Known Risks)
+完整明細與回復方式見控制中心 docs/python-environment-repair/RESULTS.md；不可將新 .venv 的驗證視為舊 Portable 包已修復。
 
 ## Git 狀態
-- Commit：本檔隨本輪 fix 提交；實際 SHA 以 git log 為準。
-- Push：本輪提交後推送 origin/main；完成狀態以遠端 Git 紀錄為準。
-- Working Tree：本輪修改已驗證，隨本輪提交保存。
+- Commit：上述 SHA 為提交前基準；最新 SHA 見 `git log -1` 與中央同步報告。
+- Push：實際推送及遠端核對結果見中央 `docs/github-sync/RESULTS.md`。
+- Working Tree：最終狀態見中央同步報告；不含被忽略的環境、成品與使用者資料。
 - Branch：main。
 
-## 下一步
-重新啟動 run.bat，載入歷史快照或開始新查詢；於採集與匯出工作區儲存 Agent 分析包。
+## 下一步建議動作 (Next Recommended Action)
+正常使用既有入口；若未要求發布，停止擴大修改。日後提交須先核對工作範圍，07 既有修改不得混入本輪。正式發布前再完成發布門檻。
+
+## 發布狀態 (Release Status)
+本輪沒有建立新發布版；既有版本保留。

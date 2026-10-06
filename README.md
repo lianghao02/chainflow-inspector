@@ -11,6 +11,14 @@
 
 > **法律與證據界線：** 地址分類、資金關聯與交易所標籤，不是自然人身分、實際控制權或違法事實的認定。交易所 KYC、IP 與帳戶控制資料，仍須依正式法定程序調取並由承辦人員核實。
 
+## 專案概念與開發原因
+
+ChainFlow Inspector 將鏈上查詢、交易整理與證據包輸出做成可重現的工作流程。開發動機是逐頁查 Explorer 容易漏掉分頁、限制與時間範圍，也不容易保留每次分析實際使用的來源。
+
+設計將資料蒐集與後續研判分開：程式保存查詢結果、診斷及可核對輸出，Agent 或分析人員再解讀資金流。地址關聯、公開標籤與時間接近都需要其他證據支持，不能直接當成身分認定。
+
+**典型流程**：設定查詢範圍 → 蒐集鏈上資料 → 查看診斷與完整性 → 匯出 Bundle／報表 → 人工研判。
+
 ## 核心能力
 
 1. **多維鏈上資料採集（Evidence Collection）**：
@@ -46,12 +54,12 @@
 
 ## Windows 執行
 
-1. 安裝 [Python 3.11 以上](https://www.python.org/downloads/windows/)，安裝時勾選 **Add Python to PATH**。
+1. 安裝完整 [Python 3.13](https://www.python.org/downloads/windows/)；不需為本專案更動全域 PATH。
 2. 安裝核心依賴套件（HTML 現代化工作台所需）：
    ```powershell
-   py -3 -m pip install -r requirements.txt
+   pwsh -NoProfile -File setup_and_run.ps1 -NoLaunch
    ```
-3. 執行程式：雙擊 `run.bat` 或在命令列執行 `python app.py`。
+3. 執行程式：雙擊 `run.bat` 或在命令列執行 `.venv\Scripts\python.exe -s app.py`。
 4. 系統以 PyWebView 原生視窗開啟工作台。
 5. 在「採集與匯出」輸入地址或交易雜湊（支援 PolygonScan 網址），按「開始採集」。時間、歷史 CSV 與追蹤深度位於進階設定。
 6. 查詢後依需求切換工作區：
@@ -108,8 +116,42 @@
 
 ## 測試
 
+歷史資料單元測試使用暫存資料，可在專案環境執行：
+
 ```powershell
-py -3 -m unittest discover -s tests -v
+.venv\Scripts\python.exe -B -s -m unittest tests.test_history -v
 ```
 
-全案目前包含 **114 項單元測試**（涵蓋分析邏輯、時間錨定、跨鏈穿透、CSV 投注候選、投注語意精確配對、歷史查詢範圍、SVG 匯出、GUI 佈局、Provider 健全性防禦、法證入金路徑分類、函調候選清單提煉、個人錢包遞迴向上追查、歷史最早 POL 燃料開戶來源排序檢驗、EOA 逐筆本金嚴格分級與金額不符降級防護、模型序列化與 PyWebView Controller 初始化），無桌面環境下自動略過 Tkinter 視窗測試，執行結果應為全數 `OK` 通過。
+完整套件涵蓋蒐集、研判、輸出與 GUI；部分整合測試會寫入歷史快照。請先準備隔離專案副本與測試資料，於副本的最終路徑建立環境，勿複製原 .venv，也勿接上正式 history，再執行：
+
+```powershell
+.venv\Scripts\python.exe -B -s -m unittest discover -s tests -v
+```
+
+測試數量、略過項目與成敗以實際輸出為準。單元測試不取代真實 API、瀏覽器視窗與不同 Provider 的功能驗證。
+
+## 開發環境與啟動（2026-10 環境修復）
+
+- 使用完整 Python 3.13 建立專案 `.venv`；啟動器不依賴 `python` 與 `py` 的預設版本。
+- 首次執行既有 BAT 入口，或 `pwsh -NoProfile -File setup_and_run.ps1 -NoLaunch`。需要網路取得 requirements.txt 的指定版本；無 Python 時提供安裝指引。
+- 唯讀健檢：`pwsh -NoProfile -File setup_and_run.ps1 -CheckOnly`；不建立環境、不下載套件。
+- 正常啟動使用 `.venv\Scripts\python.exe -B -s`。所有手動套件操作也必須使用此直譯器的 `-m pip`。
+- 已就緒環境不反覆安裝；`-Force` 僅重新套用依賴，不刪除環境。版本不符或環境損壞時保留現場，不自動改用全域 Python。
+- `.venv` 不可搬移。換路徑或重新 Clone 後須於最終路徑重新建立；全域 PATH 與全域套件不需調整。
+- 開發 `.venv` 與現有 Release／Portable 成品分開維護，既有發布包保留。免安裝、Win10／11 與乾淨電腦相容性另依發布門檻驗證。
+
+## 已知 Bug、限制與疑難排解
+
+以下區分已確認問題、功能限制及待驗證項目；歷史修正不代表舊發行包已自動更新，也不代表本次文件更新重新完成所有功能測試。
+
+| 狀態 | 情境 | 處理方式 |
+|---|---|---|
+| 資料限制 | RPC／Explorer 限流、逾時、分頁上限或歷史資料不足。 | 先看診斷及蒐集範圍；空結果不一定代表沒有交易，部分資料也不能當成完整路徑。 |
+| 判讀限制 | 公開地址標籤、金流關聯與雜湊都不能單獨證明控制者身分。 | 保留查核來源與日期，將身分研判、函調與程式輸出分開；雜湊也不是數位簽章。 |
+| 測試注意 | 部分 GUI 整合測試會寫入歷史快照。 | 完整測試於隔離副本／測試資料目錄執行；不要直接對正式 history 反覆跑完整套件。 |
+
+目前查詢、Provider 與模型邊界詳見 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)；現行交接見 [HANDOFF.md](HANDOFF.md)。合成資料驗證不代表每個遠端 Provider 都已實測；真實 API、跨電腦與正式案件流程需另外驗證。
+
+### 問題回報
+
+請提供使用版本／啟動方式、作業系統與相關環境、重現步驟、預期及實際結果，以及去識別的錯誤訊息或最小樣本。先保留現場與來源資料；不要附真實案件、完整帳號、密碼、Token 或 API Key。版本修正以對應原始碼與發行包為準。

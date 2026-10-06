@@ -9,7 +9,7 @@ def main() -> None:
         err_msg = (
             "【執行環境提示】尚未安裝 HTML 工作台所需之依賴套件 (pywebview)。\n"
             "請先於終端機執行下列指令完成安裝：\n\n"
-            "    py -3 -m pip install -r requirements.txt\n"
+            "    powershell -NoProfile -ExecutionPolicy Bypass -File setup_and_run.ps1 -NoLaunch\n"
         )
         print(f"\n{err_msg}", file=sys.stderr)
 
@@ -23,7 +23,7 @@ def main() -> None:
                 "HTML 介面依賴未安裝",
                 "偵測到尚未安裝 pywebview 套件。\n\n"
                 "請先於終端機執行：\n"
-                "py -3 -m pip install -r requirements.txt\n\n"
+                "powershell -NoProfile -ExecutionPolicy Bypass -File setup_and_run.ps1 -NoLaunch\n\n"
                 "是否要暫時以舊版 Tkinter 備援介面啟動？"
             )
             root.destroy()
