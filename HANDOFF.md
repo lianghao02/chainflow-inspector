@@ -3,14 +3,18 @@
 ## 核心元資料 (Metadata)
 - **Repository**：lianghao02/chainflow-inspector
 - **Branch**：main
-- **Commit SHA**：a63b39ce84288750986ac253c6314bd95b6055cb（本輪提交前基準；最新提交以 Git 記錄為準）
+- **Commit SHA**：790f908（本輪文件修改前基準；本輪尚未提交）
 - **Skill Version**：v1.0.0
-- **Task Type**：HANDOFF
+- **Task Type**：AUDIT / HANDOFF
 - **Local Path Hint**：15_chainflow-inspector
 
 ---
 
 ## 目前狀態
+
+使用者已於本輪授權依專案／分支分開提交與推送；下列未提交描述為提交前斷點，最終提交與遠端同步結果見控制中心本輪計畫及 Git。
+2026-10-22：補齊 CHANGELOG，保留 v1.6.0，標籤後三筆提交列為未發布；本輪僅文件修改，尚未提交推送。以下環境修復記錄繼承前輪成果。
+
 開發環境修復已驗證；本輪不包含正式發布。
 
 ## 本輪目標
@@ -20,6 +24,8 @@
 上述 SHA 為修復前已存在的 HEAD。既有功能成果承接原版本，不重做或撤銷；詳細跨專案基準位於控制中心 docs/python-environment-repair/baseline.json。
 
 ## 已完成 (Completed)
+- 本輪依 v1.6.0／585aaeb 至 790f908 的三筆提交整理未發布修正，README 加入更新紀錄入口。
+- 專案 .venv 執行匯出路徑回歸 5/5 通過，使用 TemporaryDirectory 與虛構資料，未進行鏈上採集或寫入正式歷史。
 2026-10-06 GitHub 同步交接：使用者已授權提交與推送前輪成果；本輪只提交已核對範圍。最新 Commit SHA、遠端同步與 CI 結果統一見控制中心 `docs/github-sync/RESULTS.md`，不將提交本身的 SHA 寫入同一份提交。 本輪補正 PowerShell 5.1 中文腳本編碼：僅增加 UTF-8 BOM，原內容位元組不變；29 個相關腳本在 5.1／7 語法檢查均通過，環境 CheckOnly 亦通過。
 
 2026-10-06 代表性驗收：隔離的合成歷史保存／還原相等，六格式匯出與 ZIP 完整性通過；socket.connect 被測試阻擋，沒有線上採集或正式案件歷史寫入。沒有變更產品程式或發布包；詳見中央 docs/new-build-acceptance/RESULTS.md。
@@ -31,6 +37,8 @@
 建立 .venv 3.13.15，統一 run.bat／setup 入口，保留 pywebview 6.2.1／pythonnet 3.1.0；修正舊 <6 宣告及全域安裝指引。
 
 ## 異動檔案 (Changed Files)
+本輪僅 CHANGELOG.md、README.md、HANDOFF.md；以下為前輪環境修正範圍。
+
 run.bat、setup_and_run.ps1、requirements.txt、requirements-build.txt、app.py 的環境錯誤指引、README.md。
 
 ## 刻意未修改 (Do Not Do / Deliberately Omitted)
@@ -50,6 +58,8 @@ Win10／其他使用者／無全域 Python 電腦、完整原生介面互動、�
 完整明細與回復方式見控制中心 docs/python-environment-repair/RESULTS.md；不可將新 .venv 的驗證視為舊 Portable 包已修復。
 
 ## Git 狀態
+本輪（2026-10-22）：main／790f908，Modified（僅上述文件）、未提交推送；版本不變。以下原記錄為前輪。
+
 - Commit：上述 SHA 為提交前基準；最新 SHA 見 `git log -1` 與中央同步報告。
 - Push：實際推送及遠端核對結果見中央 `docs/github-sync/RESULTS.md`。
 - Working Tree：最終狀態見中央同步報告；不含被忽略的環境、成品與使用者資料。
