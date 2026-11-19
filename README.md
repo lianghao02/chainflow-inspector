@@ -1,6 +1,6 @@
 # 鏈流查核｜ChainFlow Inspector (Blockchain Evidence Collector)
 
-> **目前版本**：`v1.6.1`（2026-10-22）
+> **目前版本**：`v1.6.2`（2026-11-19）
 > **更新紀錄**：[CHANGELOG.md](CHANGELOG.md)
 > **核心定位**：**Blockchain Evidence Collector + Diagnostic Tool + Agent Analysis Bundle Exporter**
 
